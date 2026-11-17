@@ -45,6 +45,8 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           WEATHERAPI_KEY: ${{ secrets.WEATHERAPI_KEY }}
+          OPENSKY_CLIENT_ID: ${{ secrets.OPENSKY_CLIENT_ID }}
+          OPENSKY_CLIENT_SECRET: ${{ secrets.OPENSKY_CLIENT_SECRET }}
           PYTHONUNBUFFERED: "1"
         run: |
           xvfb-run -a python -m src.batch_runner --batch ${{ matrix.batch }} --direction ${{ matrix.direction }}
