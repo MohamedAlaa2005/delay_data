@@ -34,11 +34,17 @@ def scrape_airport_board(page, airport, direction="departures", max_clicks=6):
             break
 
     try:
-        page.wait_for_selector("table", timeout=15000)
+        page.wait_for_selector("table", timeout=12000)
     except Exception:
         title = page.title()
-        print(f"     [!] No flight table found for {iata} {direction}. Page title: '{title}'")
-        return []
+        print(f"     [!] Web table not accessible on this IP (Page title: '{title}').")
+        print(f"     [->] Seamlessly falling back to OpenSky Aviation API...")
+        from src.aviation_api import fetch_opensky_flights
+        api_records = fetch_opensky_flights(airport.get("icao_code", ""), direction=direction)
+        for r in api_records:
+            r["airport_iata"] = iata
+            r["country"] = airport.get("country_name", "")
+        return api_records
 
     # Get initial row IDs (offset 0) to exclude subsequent/future flights
     initial_ids = set(page.eval_on_selector_all("table tbody tr", "elements => elements.map(e => e.id).filter(id => id)"))
