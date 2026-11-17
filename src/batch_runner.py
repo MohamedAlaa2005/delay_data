@@ -15,7 +15,7 @@ from src.weather import (
     fetch_aviation_metar, find_prior_metar,
     fetch_weatherapi_history, find_prior_weatherapi
 )
-from src.db import upsert_records
+from src.db import upsert_records, init_tables, get_db_connection
 
 def load_all_airports():
     if not AIRPORTS_FILE.exists():
@@ -131,68 +131,81 @@ def run_batch(batch_num, direction, headless=True):
     airports = get_airports_for_batch(batch_num)
     print(f"Airports in this batch ({len(airports)}): {[a['iata_code'] for a in airports]}")
 
+    table_name = "departures" if direction == "departures" else "arrivals"
+    
+    # Initialize DB connection and tables once for high-performance batching
+    db_conn = get_db_connection()
+    if db_conn:
+        print(f"[✓] Connected to Neon PostgreSQL. Ensuring '{table_name}' table schema is ready...")
+        init_tables(table_name, conn=db_conn)
+
     all_batch_records = []
+    total_upserted = 0
 
-    with sync_playwright() as p:
-        launch_args = [
-            "--disable-blink-features=AutomationControlled",
-            "--no-sandbox",
-            "--disable-setuid-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-infobars",
-            "--window-size=1920,1080"
-        ]
-        
-        # Try real Chrome first, fallback to Chromium
-        try:
-            browser = p.chromium.launch(headless=headless, channel="chrome", args=launch_args)
-        except Exception:
-            browser = p.chromium.launch(headless=headless, args=launch_args)
-
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            viewport={"width": 1920, "height": 1080},
-            locale="en-US",
-            timezone_id="UTC"
-        )
-        
-        # Mask webdriver property so Cloudflare doesn't flag automation
-        context.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => undefined
-            });
-            window.chrome = {
-                runtime: {}
-            };
-        """)
-
-        for idx, apt in enumerate(airports, 1):
-            iata = apt["iata_code"]
-            print(f"\n[{idx}/{len(airports)}] Processing {iata} ({apt['airport_name']})...")
-            page = None
+    try:
+        with sync_playwright() as p:
+            launch_args = [
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-infobars",
+                "--window-size=1920,1080"
+            ]
+            
+            # Try real Chrome first, fallback to Chromium
             try:
-                page = context.new_page()
-                raw_records = scrape_airport_board(page, apt, direction=direction)
-                if raw_records:
-                    enriched = enrich_flight_records(raw_records, apt)
-                    append_to_local_csv(enriched, direction)
-                    all_batch_records.extend(enriched)
-            except Exception as e:
-                print(f"     [!] Error processing {iata}: {e}")
-            finally:
-                if page:
-                    try: page.close()
-                    except Exception: pass
+                browser = p.chromium.launch(headless=headless, channel="chrome", args=launch_args)
+            except Exception:
+                browser = p.chromium.launch(headless=headless, args=launch_args)
 
-        browser.close()
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                viewport={"width": 1920, "height": 1080},
+                locale="en-US",
+                timezone_id="UTC"
+            )
+            
+            # Mask webdriver property so Cloudflare doesn't flag automation
+            context.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined
+                });
+                window.chrome = {
+                    runtime: {}
+                };
+            """)
 
-    print(f"\n[✓] Batch {batch_num} {direction} completed: {len(all_batch_records)} flights collected.")
+            for idx, apt in enumerate(airports, 1):
+                iata = apt["iata_code"]
+                print(f"\n[{idx}/{len(airports)}] Processing {iata} ({apt['airport_name']})...")
+                page = None
+                try:
+                    page = context.new_page()
+                    raw_records = scrape_airport_board(page, apt, direction=direction)
+                    if raw_records:
+                        enriched = enrich_flight_records(raw_records, apt)
+                        append_to_local_csv(enriched, direction)
+                        all_batch_records.extend(enriched)
+                        
+                        # High-performance immediate SQL batch upsert per airport
+                        if db_conn:
+                            count = upsert_records(table_name, enriched, conn=db_conn)
+                            total_upserted += count
+                except Exception as e:
+                    print(f"     [!] Error processing {iata}: {e}")
+                finally:
+                    if page:
+                        try: page.close()
+                        except Exception: pass
 
-    # Push to Neon PostgreSQL
-    if all_batch_records:
-        table_name = "departures" if direction == "departures" else "arrivals"
-        print(f"Syncing Batch {batch_num} to Neon table '{table_name}'...")
-        upsert_records(table_name, all_batch_records)
+            browser.close()
+    finally:
+        if db_conn:
+            try: db_conn.close()
+            except Exception: pass
+
+    print(f"\n[✓] Batch {batch_num} {direction} completed: {len(all_batch_records)} flights collected, {total_upserted} records synced to Neon '{table_name}'.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run 1 of the 6 Flight Delay Scraper Batches")
