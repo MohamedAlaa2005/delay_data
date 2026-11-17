@@ -17,6 +17,16 @@ from src.weather import (
 )
 from src.db import upsert_records, init_tables, get_db_connection
 
+CSV_FIELDNAMES = [
+    "airport_iata", "airport_icao", "country", "date", "scheduled", "flight", "airline",
+    "route_airport", "type", "status", "delay_minutes",
+    "metar_time", "metar_flt_cat", "metar_temp_c", "metar_dewp_c", "metar_wdir_deg",
+    "metar_wspd_kt", "metar_visib_mi", "metar_altim_hpa", "metar_cover", "metar_cloud_base_ft",
+    "wapi_temp_c", "wapi_feelslike_c", "wapi_rh_pct", "wapi_precip_mm", "wapi_pressure_hpa",
+    "wapi_cloud_pct", "wapi_vis_km", "wapi_wind_spd_kph", "wapi_wind_dir_deg", "wapi_wind_gust_kph",
+    "wapi_cond_text", "wapi_cond_code", "wapi_is_day"
+]
+
 def load_all_airports():
     if not AIRPORTS_FILE.exists():
         raise FileNotFoundError(f"Airports file not found: {AIRPORTS_FILE}")
@@ -104,8 +114,23 @@ def enrich_flight_records(records, airport):
             "metar_altim_hpa": prior_metar.get("altim", "") if prior_metar else "",
             "metar_cover": prior_metar.get("cover", "") if prior_metar else "",
             "metar_cloud_base_ft": cloud_base,
+            # Surface Weather (WeatherAPI) - initialized with empty string
+            "wapi_temp_c": "",
+            "wapi_feelslike_c": "",
+            "wapi_rh_pct": "",
+            "wapi_precip_mm": "",
+            "wapi_pressure_hpa": "",
+            "wapi_cloud_pct": "",
+            "wapi_vis_km": "",
+            "wapi_wind_spd_kph": "",
+            "wapi_wind_dir_deg": "",
+            "wapi_wind_gust_kph": "",
+            "wapi_cond_text": "",
+            "wapi_cond_code": "",
+            "wapi_is_day": "",
         }
-        row.update(prior_wapi)
+        if prior_wapi:
+            row.update(prior_wapi)
         enriched.append(row)
 
     return enriched
@@ -115,10 +140,9 @@ def append_to_local_csv(enriched_records, direction):
         return
     csv_file = DEPARTURES_FILE if direction == "departures" else ARRIVALS_FILE
     file_exists = csv_file.exists() and csv_file.stat().st_size > 0
-    fieldnames = list(enriched_records[0].keys())
 
     with open(csv_file, "a", newline="", encoding="utf-8-sig") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer = csv.DictWriter(f, fieldnames=CSV_FIELDNAMES, extrasaction="ignore")
         if not file_exists:
             writer.writeheader()
         writer.writerows(enriched_records)
