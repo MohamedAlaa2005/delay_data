@@ -20,21 +20,34 @@ def scrape_airport_board(page, airport, direction="departures", max_clicks=6):
     print(f"  -> Scraping {iata} ({airport.get('country_name', '')}) {direction.upper()}...")
 
     try:
-        page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        page.goto(url, wait_until="domcontentloaded", timeout=15000)
     except Exception as e:
         print(f"     [!] Navigation timeout/error for {iata}: {e}")
-        return []
+        print(f"     [->] Seamlessly falling back to OpenSky Aviation API...")
+        from src.aviation_api import fetch_opensky_flights
+        api_records = fetch_opensky_flights(airport.get("icao_code", ""), direction=direction)
+        for r in api_records:
+            r["airport_iata"] = iata
+            r["country"] = airport.get("country_name", "")
+        return api_records
 
-    # If Cloudflare challenge page appears, allow brief time for headed browser verification to settle
-    for _ in range(3):
+    # Check for Cloudflare challenge page
+    title = page.title()
+    if "Just a moment..." in title or "Attention Required" in title:
+        page.wait_for_timeout(2000)
         title = page.title()
         if "Just a moment..." in title or "Attention Required" in title:
-            page.wait_for_timeout(3000)
-        else:
-            break
+            print(f"     [!] Cloudflare challenge detected (Page title: '{title}').")
+            print(f"     [->] Seamlessly falling back to OpenSky Aviation API...")
+            from src.aviation_api import fetch_opensky_flights
+            api_records = fetch_opensky_flights(airport.get("icao_code", ""), direction=direction)
+            for r in api_records:
+                r["airport_iata"] = iata
+                r["country"] = airport.get("country_name", "")
+            return api_records
 
     try:
-        page.wait_for_selector("table", timeout=12000)
+        page.wait_for_selector("table", timeout=8000)
     except Exception:
         title = page.title()
         print(f"     [!] Web table not accessible on this IP (Page title: '{title}').")
