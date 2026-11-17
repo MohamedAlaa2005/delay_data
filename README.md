@@ -1,6 +1,8 @@
 # Flight Delay Prediction Pipeline: 100 Airports & Weather Intelligence
 
-An automated end-to-end data pipeline that scrapes historical and live flight delay records across **100 global commercial airports** (max 2 airports per country), enriches each flight with strict anti-leakage pre-flight atmospheric observations (**WeatherAPI.com** + **AviationWeather.gov METAR**), and syncs clean, non-redundant relational tables into **Neon PostgreSQL**.
+An automated, cloud-resilient end-to-end data pipeline that scrapes flight delay records across **100 global commercial airports** (max 2 airports per country), enriches each flight with strict anti-leakage pre-flight atmospheric observations (**WeatherAPI.com** + **AviationWeather.gov METAR**), and streams clean, non-redundant relational datasets into **Neon Serverless PostgreSQL**.
+
+> **Detailed Technical Summary**: See [`PROJECT_SUMMARY.md`](PROJECT_SUMMARY.md) for the full architectural breakdown, data dictionary, and database design.
 
 ---
 
@@ -22,16 +24,16 @@ delay_data/
 │   └── FEATURES_GUIDE.md           # SQL derivation recipes & removed redundant columns guide
 ├── src/
 │   ├── __init__.py
-│   ├── scraper.py                  # Playwright Plane Finder scraper (with continuous earlier flight clicks)
-│   ├── weather.py                  # WeatherAPI.com + AviationWeather METAR enrichment
+│   ├── aviation_api.py             # OpenSky Network OAuth2 REST API client
+│   ├── batch_runner.py             # 6-batch runner with immediate SQL streaming
 │   ├── db.py                       # Neon PostgreSQL batch upsert and schema management
-│   └── batch_runner.py             # CLI runner for the 6 batches
-├── main.py                         # Top-level unified CLI
+│   ├── scraper.py                  # Playwright scraper with immediate fallback logic
+│   └── weather.py                  # Aviation METAR + WeatherAPI historical fetcher
 ├── analyze_delays.py               # Delay analytics & weather benchmark report generator
-├── push_to_neon.py                 # Standalone script to push local CSVs into Neon
+├── main.py                         # Top-level unified CLI
 ├── requirements.txt                # Python dependencies
-├── .env.example                    # Template for required environment variables
-└── .gitignore                      # Safe ignore list (credentials, node_modules, logs)
+├── PROJECT_SUMMARY.md              # Full architectural documentation & data dictionary
+└── README.md                       # Repository overview and quickstart guide
 ```
 
 ---
@@ -57,12 +59,15 @@ Workflow file: [`.github/workflows/scrape_pipeline.yml`](.github/workflows/scrap
 
 * **Schedule**: Runs automatically **every day at 12:00 UTC** (`cron: '0 12 * * *'`).
 * **Matrix Concurrency**: Executes all 6 batches concurrently in parallel using GitHub Actions runners.
+* **Dual-Engine Ingestion**: Uses Playwright headed Chrome (`xvfb-run`), and seamlessly falls back to **The OpenSky Network Authenticated API** when datacenter IPs encounter Cloudflare anti-bot challenges.
 * **Manual Trigger**: Can also be executed manually anytime via the **Actions** tab in GitHub (**Run workflow** button).
 
-### Required GitHub Repository Secrets
-Under your GitHub repo's **Settings > Secrets and variables > Actions**, add:
-1. `DATABASE_URL`: Your Neon PostgreSQL connection string (`postgresql://...`).
+### Required GitHub Environment Secrets (`DATABASE_URL` environment):
+Under **Settings > Environments > DATABASE_URL > Environment secrets**:
+1. `DATABASE_URL`: Your Neon PostgreSQL connection string.
 2. `WEATHERAPI_KEY`: Your WeatherAPI key (`a0ba9f00b276465...`).
+3. `OPENSKY_CLIENT_ID`: OpenSky OAuth2 client ID (`mohamedalaa-api-client`).
+4. `OPENSKY_CLIENT_SECRET`: OpenSky OAuth2 client secret.
 
 ---
 
@@ -86,9 +91,3 @@ python analyze_delays.py
 python analyze_delays.py --country "Saudi Arabia"
 python analyze_delays.py --country "Australia"
 ```
-
-### Sync Local CSV Files to Neon:
-```powershell
-python push_to_neon.py
-```
-
