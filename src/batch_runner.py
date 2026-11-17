@@ -134,14 +134,37 @@ def run_batch(batch_num, direction, headless=True):
     all_batch_records = []
 
     with sync_playwright() as p:
-        # Launch Chromium (supports both headless CI and headed local)
-        launch_args = ["--disable-blink-features=AutomationControlled"]
+        launch_args = [
+            "--disable-blink-features=AutomationControlled",
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-infobars",
+            "--window-size=1920,1080"
+        ]
+        
+        # Try real Chrome first, fallback to Chromium
         try:
             browser = p.chromium.launch(headless=headless, channel="chrome", args=launch_args)
         except Exception:
             browser = p.chromium.launch(headless=headless, args=launch_args)
 
-        context = browser.new_context()
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            viewport={"width": 1920, "height": 1080},
+            locale="en-US",
+            timezone_id="UTC"
+        )
+        
+        # Mask webdriver property so Cloudflare doesn't flag automation
+        context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
+            window.chrome = {
+                runtime: {}
+            };
+        """)
 
         for idx, apt in enumerate(airports, 1):
             iata = apt["iata_code"]

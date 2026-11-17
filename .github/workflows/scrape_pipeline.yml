@@ -35,9 +35,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Install Playwright Chromium with System Dependencies
+      - name: Install Google Chrome & Virtual Display (Xvfb)
         run: |
-          playwright install chromium --with-deps
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          playwright install chrome --with-deps || playwright install chromium --with-deps
 
       - name: Run Scraper & Push to Neon (Batch ${{ matrix.batch }} ${{ matrix.direction }})
         env:
@@ -45,5 +47,5 @@ jobs:
           WEATHERAPI_KEY: ${{ secrets.WEATHERAPI_KEY }}
           PYTHONUNBUFFERED: "1"
         run: |
-          python -m src.batch_runner --batch ${{ matrix.batch }} --direction ${{ matrix.direction }} --headless
+          xvfb-run -a python -m src.batch_runner --batch ${{ matrix.batch }} --direction ${{ matrix.direction }}
 

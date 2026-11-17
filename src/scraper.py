@@ -20,15 +20,24 @@ def scrape_airport_board(page, airport, direction="departures", max_clicks=6):
     print(f"  -> Scraping {iata} ({airport.get('country_name', '')}) {direction.upper()}...")
 
     try:
-        page.goto(url, wait_until="domcontentloaded", timeout=25000)
+        page.goto(url, wait_until="domcontentloaded", timeout=30000)
     except Exception as e:
         print(f"     [!] Navigation timeout/error for {iata}: {e}")
         return []
 
+    # If Cloudflare challenge page appears, allow brief time for headed browser verification to settle
+    for _ in range(3):
+        title = page.title()
+        if "Just a moment..." in title or "Attention Required" in title:
+            page.wait_for_timeout(3000)
+        else:
+            break
+
     try:
-        page.wait_for_selector("table", timeout=10000)
+        page.wait_for_selector("table", timeout=15000)
     except Exception:
-        print(f"     [!] No flight table found for {iata} {direction}.")
+        title = page.title()
+        print(f"     [!] No flight table found for {iata} {direction}. Page title: '{title}'")
         return []
 
     # Get initial row IDs (offset 0) to exclude subsequent/future flights
