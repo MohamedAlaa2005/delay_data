@@ -46,9 +46,9 @@ CREATE TABLE IF NOT EXISTS {table_name} (
     wapi_cond_text VARCHAR(60),
     wapi_cond_code INT,
     wapi_is_day INT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uniq_{table_name}_flight_time UNIQUE (airport_iata, flight, scheduled_time)
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_{table_name}_flight_time ON {table_name}(airport_iata, flight, scheduled_time);
 CREATE INDEX IF NOT EXISTS idx_{table_name}_airport ON {table_name}(airport_iata);
 CREATE INDEX IF NOT EXISTS idx_{table_name}_time ON {table_name}(scheduled_time);
 """
@@ -62,6 +62,24 @@ COLUMNS = [
     "wapi_cond_text", "wapi_cond_code", "wapi_is_day"
 ]
 
+def safe_float(v):
+    """Safely parse float values, handling None, empty strings, and non-numeric strings (e.g. 'VRB')."""
+    if v in (None, ""):
+        return None
+    try:
+        return float(v)
+    except (ValueError, TypeError):
+        return None
+
+def safe_int(v):
+    """Safely parse integer values, handling None, empty strings, and non-numeric strings (e.g. 'VRB', 'CALM')."""
+    if v in (None, ""):
+        return None
+    try:
+        return int(float(v))
+    except (ValueError, TypeError):
+        return None
+
 def get_db_connection():
     """Retrieve an active connection to Neon PostgreSQL."""
     db_url = os.environ.get("DATABASE_URL") or DATABASE_URL
@@ -74,7 +92,7 @@ def get_db_connection():
         return None
 
 def init_tables(table_name, conn=None):
-    """Ensure table and indexes exist once before batch processing."""
+    """Ensure table and unique indexes exist once before batch processing."""
     should_close = False
     if conn is None:
         conn = get_db_connection()
@@ -136,39 +154,36 @@ def upsert_records(table_name, records, conn=None):
             if not sched_dt:
                 continue
 
-            def to_f(v): return float(v) if v not in [None, ""] else None
-            def to_i(v): return int(float(v)) if v not in [None, ""] else None
-
             t = (
                 r.get("airport_iata", "").strip().upper(),
                 sched_dt,
                 r.get("flight", "").strip(),
                 r.get("airline", "").strip(),
                 r.get("route_airport", "").strip(),
-                to_i(r.get("delay_minutes")),
+                safe_int(r.get("delay_minutes")),
                 r.get("metar_time", ""),
                 r.get("metar_flt_cat", ""),
-                to_f(r.get("metar_temp_c")),
-                to_f(r.get("metar_dewp_c")),
-                to_i(r.get("metar_wdir_deg")),
-                to_i(r.get("metar_wspd_kt")),
+                safe_float(r.get("metar_temp_c")),
+                safe_float(r.get("metar_dewp_c")),
+                safe_int(r.get("metar_wdir_deg")),
+                safe_int(r.get("metar_wspd_kt")),
                 r.get("metar_visib_mi", ""),
-                to_i(r.get("metar_altim_hpa")),
+                safe_int(r.get("metar_altim_hpa")),
                 r.get("metar_cover", ""),
-                to_i(r.get("metar_cloud_base_ft")),
-                to_f(r.get("wapi_temp_c")),
-                to_f(r.get("wapi_feelslike_c")),
-                to_i(r.get("wapi_rh_pct")),
-                to_f(r.get("wapi_precip_mm")),
-                to_f(r.get("wapi_pressure_hpa")),
-                to_i(r.get("wapi_cloud_pct")),
-                to_f(r.get("wapi_vis_km")),
-                to_f(r.get("wapi_wind_spd_kph")),
-                to_i(r.get("wapi_wind_dir_deg")),
-                to_f(r.get("wapi_wind_gust_kph")),
+                safe_int(r.get("metar_cloud_base_ft")),
+                safe_float(r.get("wapi_temp_c")),
+                safe_float(r.get("wapi_feelslike_c")),
+                safe_int(r.get("wapi_rh_pct")),
+                safe_float(r.get("wapi_precip_mm")),
+                safe_float(r.get("wapi_pressure_hpa")),
+                safe_int(r.get("wapi_cloud_pct")),
+                safe_float(r.get("wapi_vis_km")),
+                safe_float(r.get("wapi_wind_spd_kph")),
+                safe_int(r.get("wapi_wind_dir_deg")),
+                safe_float(r.get("wapi_wind_gust_kph")),
                 r.get("wapi_cond_text", ""),
-                to_i(r.get("wapi_cond_code")),
-                to_i(r.get("wapi_is_day"))
+                safe_int(r.get("wapi_cond_code")),
+                safe_int(r.get("wapi_is_day"))
             )
             tuples.append(t)
 
