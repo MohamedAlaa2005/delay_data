@@ -180,8 +180,10 @@ def push_table(conn, table_name, csv_path):
     print(f"[✓] Successfully inserted {len(data):,} records into Neon table '{table_name}'.")
     return len(data)
 
+from config.settings import DEPARTURES_FILE, ARRIVALS_FILE, DATABASE_URL
+
 def main():
-    conn_str = get_connection_string()
+    conn_str = os.environ.get("DATABASE_URL") or DATABASE_URL or get_connection_string()
     if not conn_str:
         print("[!] ERROR: Neon connection string not found.")
         print("    Ensure `neon deploy` has written credentials to `.env.local` or set `DATABASE_URL`.")
@@ -194,11 +196,13 @@ def main():
         
         # 1. Push departures
         print("\nPushing departures table...")
-        push_table(conn, "departures", "departures_with_weather.csv")
+        dep_path = DEPARTURES_FILE if DEPARTURES_FILE.exists() else "departures_with_weather.csv"
+        push_table(conn, "departures", str(dep_path))
 
         # 2. Push arrivals
         print("\nPushing arrivals table...")
-        push_table(conn, "arrivals", "arrivals_with_weather.csv")
+        arr_path = ARRIVALS_FILE if ARRIVALS_FILE.exists() else "arrivals_with_weather.csv"
+        push_table(conn, "arrivals", str(arr_path))
 
         conn.close()
         print("\n[✓] All data pushed to Neon PostgreSQL successfully!")
