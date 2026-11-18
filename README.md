@@ -57,7 +57,7 @@ Workflow file: [`.github/workflows/scrape_pipeline.yml`](.github/workflows/scrap
 
 * **Schedule**: Runs automatically **every 12 hours at 00:00 and 12:00 UTC** (`cron: '0 0,12 * * *'`).
 * **Matrix Concurrency**: Executes all 6 batches concurrently in parallel using GitHub Actions runners.
-* **Dual-Engine Ingestion**: Uses Playwright headed Chrome (`xvfb-run`), and seamlessly falls back to **The OpenSky Network Authenticated API** when datacenter IPs encounter Cloudflare anti-bot challenges.
+* **Dual-Engine Ingestion**: Uses Camoufox (a stealth Firefox hard fork spoofing fingerprint and behavioral leaks at the browser engine level with `xvfb-run`), and seamlessly falls back to **The OpenSky Network Authenticated API** when datacenter IPs encounter Cloudflare anti-bot challenges.
 * **Manual Trigger**: Can also be executed manually anytime via the **Actions** tab in GitHub (**Run workflow** button).
 
 ### Required GitHub Environment Secrets (`DATABASE_URL` environment):

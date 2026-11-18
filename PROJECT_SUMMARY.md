@@ -23,7 +23,7 @@ flowchart TD
     end
 
     subgraph Ingestion ["Dual-Engine Flight Ingestion"]
-        PF["Plane Finder Scraper (Headless Chrome / Playwright)"]
+        PF["Plane Finder Scraper (Camoufox Stealth Firefox / Playwright)"]
         OS["The OpenSky Network API (OAuth2 Authenticated Fallback)"]
     end
 

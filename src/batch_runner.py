@@ -4,7 +4,7 @@ import os
 import re
 import sys
 from datetime import datetime, timedelta
-from playwright.sync_api import sync_playwright
+from camoufox.sync_api import Camoufox
 
 from config.settings import (
     AIRPORTS_FILE, WEATHERAPI_KEY, BATCHES_COUNT
@@ -144,38 +144,17 @@ def run_batch(batch_num, direction, headless=True):
     total_upserted = 0
 
     try:
-        with sync_playwright() as p:
-            launch_args = [
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-infobars",
-                "--window-size=1920,1080"
-            ]
-            
-            # Try real Chrome first, fallback to Chromium
-            try:
-                browser = p.chromium.launch(headless=headless, channel="chrome", args=launch_args)
-            except Exception:
-                browser = p.chromium.launch(headless=headless, args=launch_args)
-
+        print(f"Launching Camoufox (Stealth Firefox, headless={headless})...")
+        with Camoufox(
+            headless=headless,
+            canvas_noise=True,
+            humanize=True,
+            i_know_what_im_doing=True
+        ) as browser:
             context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
                 viewport={"width": 1920, "height": 1080},
-                locale="en-US",
-                timezone_id="UTC"
+                locale="en-US"
             )
-            
-            # Mask webdriver property so Cloudflare doesn't flag automation
-            context.add_init_script("""
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => undefined
-                });
-                window.chrome = {
-                    runtime: {}
-                };
-            """)
 
             for idx, apt in enumerate(airports, 1):
                 iata = apt["iata_code"]

@@ -5,7 +5,7 @@ import sys
 import time
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
-from playwright.sync_api import sync_playwright
+from camoufox.sync_api import Camoufox
 import urllib.request
 import json
 import re
@@ -350,14 +350,9 @@ def run_test(num_airports=100, country_filter=None):
         print("[✓] All target airports are already scraped!")
         return
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            channel="chrome",
-            headless=False,
-            args=["--disable-blink-features=AutomationControlled"]
-        )
+    print("Launching Camoufox (Stealth Firefox)...")
+    with Camoufox(headless=False, canvas_noise=True, humanize=True, i_know_what_im_doing=True) as browser:
         context = browser.new_context()
-        page = context.new_page()
 
         for idx, a in enumerate(queue, 1):
             iata = a["iata_code"]

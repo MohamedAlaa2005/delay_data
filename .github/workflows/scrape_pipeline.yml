@@ -35,11 +35,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Install Google Chrome & Virtual Display (Xvfb)
+      - name: Install Camoufox Browser & Virtual Display (Xvfb)
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb
-          playwright install chrome --with-deps || playwright install chromium --with-deps
+          python -m camoufox fetch
 
       - name: Run Scraper & Push to Neon (Batch ${{ matrix.batch }} ${{ matrix.direction }})
         env:

@@ -2,7 +2,7 @@ import csv
 import sys
 import time
 from bs4 import BeautifulSoup
-from playwright.sync_api import sync_playwright
+from camoufox.sync_api import Camoufox
 
 TARGETS = [
     {
@@ -127,20 +127,13 @@ def scrape_airport_earlier_flights(page, target):
     print(f"[✓] Saved to '{csv_file}' successfully!")
 
 def main():
-    print("Launching Playwright with Chrome...")
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            channel="chrome",
-            headless=False,
-            args=["--disable-blink-features=AutomationControlled"]
-        )
-        context = browser.new_context()
-        page = context.new_page()
+    print("Launching Camoufox (Stealth Firefox)...")
+    with Camoufox(headless=False, humanize=True, canvas_noise=True, i_know_what_im_doing=True) as browser:
+        page = browser.new_page()
 
         for target in TARGETS:
             scrape_airport_earlier_flights(page, target)
 
-        browser.close()
     print("\nAll earlier flights scraping completed successfully!")
 
 if __name__ == "__main__":
