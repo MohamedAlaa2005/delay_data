@@ -7,7 +7,7 @@ DATA_DIR = BASE_DIR / "data"
 DOCS_DIR = BASE_DIR / "docs"
 
 # Core Data Files
-AIRPORTS_FILE = DATA_DIR / "airports_sample_100.csv"
+AIRPORTS_FILE = DATA_DIR / "airports_150.csv"
 
 def load_env():
     """Load environment variables from .env.local or .env if present."""
@@ -31,6 +31,6 @@ WEATHERAPI_KEY = os.environ.get("WEATHERAPI_KEY", "a0ba9f00b276465bbed1416322617
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 # Batching Configurations
-TOTAL_AIRPORTS = 100
-BATCHES_COUNT = 3  # 100 / 3 = ~33 airports per batch
+TOTAL_AIRPORTS = 150
+BATCHES_COUNT = 3  # 150 / 3 = 50 airports per batch
 

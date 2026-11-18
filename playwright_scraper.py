@@ -32,7 +32,32 @@ def scrape_airport_earlier_flights(page, target):
     print(f"Scraping ALL earlier {flight_type.upper()} from: {url}")
     print(f"==========================================")
 
-    page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    max_attempts = 2
+    for attempt in range(1, max_attempts + 1):
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        except Exception as e:
+            if attempt < max_attempts:
+                print(f"[!] Navigation error for {url} ({e}). Retrying once more...")
+                page.wait_for_timeout(3000)
+                continue
+            print(f"[!] Navigation error: {e}")
+            return
+
+        title = page.title()
+        if "Just a moment..." in title or "Attention Required" in title:
+            page.wait_for_timeout(4000)
+            title = page.title()
+
+        if "Just a moment..." in title or "Attention Required" in title:
+            if attempt < max_attempts:
+                print(f"[!] Cloudflare challenge detected on {url}. Retrying once more (attempt {attempt + 1}/{max_attempts})...")
+                page.wait_for_timeout(5000)
+                continue
+            else:
+                print(f"[!] Cloudflare challenge persisted on {url} after retry.")
+                return
+        break
     page.wait_for_selector("table", timeout=15000)
     page.wait_for_selector("button.earlier-flights", timeout=15000)
 

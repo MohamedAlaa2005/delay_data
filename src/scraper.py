@@ -19,20 +19,33 @@ def scrape_airport_board(page, airport, direction="departures", max_clicks=6):
     url = f"https://planefinder.net/data/airport/{iata}/{direction}"
     print(f"  -> Scraping {iata} ({airport.get('country_name', '')}) {direction.upper()}...")
 
-    try:
-        page.goto(url, wait_until="domcontentloaded", timeout=20000)
-    except Exception as e:
-        print(f"     [!] Navigation timeout/error for {iata}: {e}")
-        return []
+    max_attempts = 2  # Attempt once, retry once more if blocked by Cloudflare
+    for attempt in range(1, max_attempts + 1):
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=25000)
+        except Exception as e:
+            if attempt < max_attempts:
+                print(f"     [!] Navigation error on {iata} ({e}). Retrying once more...")
+                page.wait_for_timeout(3000)
+                continue
+            print(f"     [!] Navigation timeout/error for {iata}: {e}")
+            return []
 
-    # Check for Cloudflare challenge page
-    title = page.title()
-    if "Just a moment..." in title or "Attention Required" in title:
-        page.wait_for_timeout(3000)
+        # Check for Cloudflare challenge page
         title = page.title()
         if "Just a moment..." in title or "Attention Required" in title:
-            print(f"     [!] Cloudflare challenge detected on {iata}. Skipping to ensure 100% real data only.")
-            return []
+            page.wait_for_timeout(4000)
+            title = page.title()
+
+        if "Just a moment..." in title or "Attention Required" in title:
+            if attempt < max_attempts:
+                print(f"     [!] Cloudflare challenge detected on {iata}. Waiting and retrying once more (attempt {attempt + 1}/{max_attempts})...")
+                page.wait_for_timeout(5000)
+                continue
+            else:
+                print(f"     [!] Cloudflare challenge persisted on {iata} after retry. Skipping to ensure 100% real data only.")
+                return []
+        break
 
     try:
         page.wait_for_selector("table", timeout=10000)

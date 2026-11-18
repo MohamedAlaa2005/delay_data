@@ -14,7 +14,7 @@ import re
 # CONFIGURATION
 # =====================================================================
 WEATHERAPI_KEY = "a0ba9f00b276465bbed141632261711"
-AIRPORTS_CSV = "airports_sample_100.csv"
+AIRPORTS_CSV = "data/airports_150.csv" if os.path.exists("data/airports_150.csv") else "airports_sample_100.csv"
 
 DEPARTURES_CSV = "departures.csv"
 ARRIVALS_CSV = "arrivals.csv"
@@ -128,11 +128,32 @@ def scrape_airport_direction(page, airport, direction="departures", max_clicks=8
     url = f"https://planefinder.net/data/airport/{iata}/{direction}"
     print(f"\n--- Scraping {iata} ({airport['country_name']}) {direction.upper()} ---")
 
-    try:
-        page.goto(url, wait_until="domcontentloaded", timeout=20000)
-    except Exception as e:
-        print(f"[!] Navigation error for {iata}: {e}")
-        return []
+    max_attempts = 2  # Attempt once, retry once more if blocked by Cloudflare
+    for attempt in range(1, max_attempts + 1):
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=25000)
+        except Exception as e:
+            if attempt < max_attempts:
+                print(f"[!] Navigation error for {iata} ({e}). Retrying once more...")
+                page.wait_for_timeout(3000)
+                continue
+            print(f"[!] Navigation error for {iata}: {e}")
+            return []
+
+        title = page.title()
+        if "Just a moment..." in title or "Attention Required" in title:
+            page.wait_for_timeout(4000)
+            title = page.title()
+
+        if "Just a moment..." in title or "Attention Required" in title:
+            if attempt < max_attempts:
+                print(f"[!] Cloudflare challenge detected on {iata}. Waiting and retrying once more (attempt {attempt + 1}/{max_attempts})...")
+                page.wait_for_timeout(5000)
+                continue
+            else:
+                print(f"[!] Cloudflare challenge persisted on {iata} after retry. Skipping.")
+                return []
+        break
 
     # Check for empty / 404 or table
     try:

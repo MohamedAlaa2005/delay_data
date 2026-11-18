@@ -1,6 +1,6 @@
 # Flight Delay & Aviation Weather Intelligence Pipeline — Project Summary
 
-An automated, cloud-resilient, production-ready data pipeline that tracks global commercial flight delays across **100 international airports** (max 2 airports per country across 60 countries), enriches flight movements with strictly prior atmospheric weather observations (**WeatherAPI.com** + **NOAA AviationWeather METAR**), and streams structured, non-redundant relational datasets into **Neon Serverless PostgreSQL**.
+An automated, cloud-resilient, production-ready data pipeline that tracks global commercial flight delays across **150 top international airports** (strictly international flights, max 2 airports per country across 107 sovereign countries), enriches flight movements with strictly prior atmospheric weather observations (**WeatherAPI.com** + **NOAA AviationWeather METAR**), and streams structured, non-redundant relational datasets into **Neon Serverless PostgreSQL**.
 
 ---
 
@@ -14,12 +14,12 @@ flowchart TD
     end
 
     subgraph Matrix ["6 Parallel Execution Batches"]
-        B1D["Batch 1: Departures (Airports 1-33)"]
-        B2D["Batch 2: Departures (Airports 34-66)"]
-        B3D["Batch 3: Departures (Airports 67-100)"]
-        B1A["Batch 1: Arrivals (Airports 1-33)"]
-        B2A["Batch 2: Arrivals (Airports 34-66)"]
-        B3A["Batch 3: Arrivals (Airports 67-100)"]
+        B1D["Batch 1: Departures (Airports 1-50)"]
+        B2D["Batch 2: Departures (Airports 51-100)"]
+        B3D["Batch 3: Departures (Airports 101-150)"]
+        B1A["Batch 1: Arrivals (Airports 1-50)"]
+        B2A["Batch 2: Arrivals (Airports 51-100)"]
+        B3A["Batch 3: Arrivals (Airports 101-150)"]
     end
 
     subgraph Ingestion ["Dual-Engine Flight Ingestion"]
@@ -39,7 +39,7 @@ flowchart TD
     CRON --> Matrix
     DISPATCH --> Matrix
     Matrix --> PF
-    PF -->|Cloudflare Challenge / Block| OS
+    PF -->|Cloudflare Challenge / Block (Auto-retry once)| OS
     PF -->|Web Table Found| Enrichment
     OS -->|API Flight Records| Enrichment
     Enrichment --> METAR
@@ -52,10 +52,11 @@ flowchart TD
 
 ## 2. Core Components
 
-### A. Global Airports Dataset (`data/airports_sample_100.csv`)
-- **100 curated international commercial airports** spanning **60 sovereign countries**.
+### A. Global Airports Dataset (`data/airports_150.csv`)
+- **150 curated top international commercial airports** spanning **107 sovereign countries**.
 - **Rule enforcement**: No single country has more than 2 airports (`max_per_country == 2`), preventing geographic bias.
-- Hub coverage includes high-volume airports across all continents (e.g., `SYD`, `MEL`, `LHR`, `CDG`, `FRA`, `HND`, `DXB`, `JED`, `RUH`, `EZE`, `GRU`, `YYZ`, `CAI`, `ADD`).
+- **International verification**: Exclusively airports operating international commercial routes (domestic/local-only airfields removed).
+- Hub coverage includes high-volume airports across all continents (e.g., `ATL`, `ORD`, `PEK`, `PVG`, `LHR`, `LGW`, `CDG`, `FRA`, `MUC`, `AMS`, `HND`, `NRT`, `DXB`, `AUH`, `RUH`, `JED`, `EZE`, `GRU`, `YYZ`, `CAI`, `ADD`, `SYD`, `BNE`).
 
 ### B. Dual-Engine Flight Scraper (`src/scraper.py` & `src/aviation_api.py`)
 - **Engine 1 (Plane Finder)**: Uses Playwright with stealth context to scrape airport arrival/departure boards, clicking *"Earlier flights"* continuously to capture preceding flight blocks.
@@ -161,7 +162,7 @@ delay_data/
 │   ├── settings.py                 # Configuration manager & path resolutions
 │   └── neon.ts                     # Neon CLI project configuration
 ├── data/
-│   ├── airports_sample_100.csv     # 100 global airports (max 2 per country)
+│   ├── airports_150.csv            # 150 top global international airports (max 2 per country)
 │   ├── departures_with_weather.csv # Local cached departures with weather
 │   └── arrivals_with_weather.csv   # Local cached arrivals with weather
 ├── docs/

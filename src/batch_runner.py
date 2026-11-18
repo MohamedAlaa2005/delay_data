@@ -25,7 +25,7 @@ def load_all_airports():
 def get_airports_for_batch(batch_number):
     airports = load_all_airports()
     total = len(airports)
-    # Split 100 airports into 3 batches: [0..33), [33..66), [66..100)
+    # Split 150 airports into 3 batches: [0..50), [50..100), [100..150)
     chunk_size = (total + BATCHES_COUNT - 1) // BATCHES_COUNT
     start_idx = (batch_number - 1) * chunk_size
     end_idx = min(start_idx + chunk_size, total)

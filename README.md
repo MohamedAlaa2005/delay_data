@@ -1,6 +1,6 @@
-# Flight Delay Prediction Pipeline: 100 Airports & Weather Intelligence
+# Flight Delay Prediction Pipeline: 150 Top International Airports & Weather Intelligence
 
-An automated, cloud-resilient end-to-end data pipeline that scrapes flight delay records across **100 global commercial airports** (max 2 airports per country), enriches each flight with strict anti-leakage pre-flight atmospheric observations (**WeatherAPI.com** + **AviationWeather.gov METAR**), and streams clean, non-redundant relational datasets into **Neon Serverless PostgreSQL**.
+An automated, cloud-resilient end-to-end data pipeline that scrapes flight delay records across **150 top international commercial airports** (strictly international flights, max 2 airports per country across 107 sovereign countries), enriches each flight with strict anti-leakage pre-flight atmospheric observations (**WeatherAPI.com** + **AviationWeather.gov METAR**), and streams clean, non-redundant relational datasets into **Neon Serverless PostgreSQL**.
 
 > **Detailed Technical Summary**: See [`PROJECT_SUMMARY.md`](PROJECT_SUMMARY.md) for the full architectural breakdown, data dictionary, and database design.
 
@@ -17,7 +17,7 @@ delay_data/
 │   ├── settings.py                 # Central configurations & environment loaders
 │   └── neon.ts                     # Neon CLI project configuration
 ├── data/
-│   └── airports_sample_100.csv     # 100 curated international airports (60 countries)
+│   └── airports_150.csv            # 150 top international airports (107 countries, max 2 per country)
 ├── docs/
 │   └── FEATURES_GUIDE.md           # SQL derivation recipes & removed redundant columns guide
 ├── src/
@@ -38,16 +38,16 @@ delay_data/
 
 ## 2. The 6-Batch Architecture
 
-The **100 airports** are partitioned into **3 airport batches**, and each batch is split into **Departures** and **Arrivals**, creating **6 distinct batches**:
+The **150 airports** are partitioned into **3 airport batches** (50 airports each), and each batch is split into **Departures** and **Arrivals**, creating **6 distinct batches**:
 
 | Batch Name | Direction | Airports Covered | Typical Airfield Hubs |
 | :--- | :--- | :---: | :--- |
-| **Batch 1 - Departures** | Departures | Airports 1 &rarr; 33 | `ALG`, `EZE`, `MEL`, `SYD`, `VIE`, `BAH`, `BRU`, `GIG`, `GRU`, `YYZ` |
-| **Batch 2 - Departures** | Departures | Airports 34 &rarr; 66 | `SCL`, `PEK`, `PVG`, `BOG`, `PRG`, `CPH`, `CAI`, `HEL`, `CDG`, `FRA` |
-| **Batch 3 - Departures** | Departures | Airports 67 &rarr; 100 | `LHR`, `ATH`, `HKG`, `DEL`, `BOM`, `CGK`, `FCO`, `HND`, `RUH`, `JED`, `DXB` |
-| **Batch 1 - Arrivals** | Arrivals | Airports 1 &rarr; 33 | Same 33 airports as Batch 1 |
-| **Batch 2 - Arrivals** | Arrivals | Airports 34 &rarr; 66 | Same 33 airports as Batch 2 |
-| **Batch 3 - Arrivals** | Arrivals | Airports 67 &rarr; 100 | Same 34 airports as Batch 3 |
+| **Batch 1 - Departures** | Departures | Airports 1 &rarr; 50 | `ALG`, `LAD`, `AEP`, `EZE`, `EVN`, `AUA`, `BNE`, `SYD`, `VIE`, `GYD`, `NAS`, `BAH`, `DAC`, `MSQ`, `BRU`, `CRL`, `COO`, `GIG`, `GRU`, `YYZ` |
+| **Batch 2 - Departures** | Departures | Airports 51 &rarr; 100 | `SCL`, `PEK`, `PVG`, `BOG`, `SJO`, `ZAG`, `HAV`, `LCA`, `PFO`, `PRG`, `CPH`, `PUJ`, `UIO`, `CAI`, `HBE`, `TLL`, `ADD`, `HEL`, `CDG`, `FRA` |
+| **Batch 3 - Departures** | Departures | Airports 101 &rarr; 150 | `LHR`, `LGW`, `ATH`, `HKG`, `DEL`, `BOM`, `CGK`, `DPS`, `TLV`, `FCO`, `MXP`, `HND`, `NRT`, `RUH`, `JED`, `DXB`, `AUH`, `ATL`, `ORD` |
+| **Batch 1 - Arrivals** | Arrivals | Airports 1 &rarr; 50 | Same 50 airports as Batch 1 |
+| **Batch 2 - Arrivals** | Arrivals | Airports 51 &rarr; 100 | Same 50 airports as Batch 2 |
+| **Batch 3 - Arrivals** | Arrivals | Airports 101 &rarr; 150 | Same 50 airports as Batch 3 |
 
 ---
 
