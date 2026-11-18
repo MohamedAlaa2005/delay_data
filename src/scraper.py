@@ -20,44 +20,26 @@ def scrape_airport_board(page, airport, direction="departures", max_clicks=6):
     print(f"  -> Scraping {iata} ({airport.get('country_name', '')}) {direction.upper()}...")
 
     try:
-        page.goto(url, wait_until="domcontentloaded", timeout=15000)
+        page.goto(url, wait_until="domcontentloaded", timeout=20000)
     except Exception as e:
         print(f"     [!] Navigation timeout/error for {iata}: {e}")
-        print(f"     [->] Seamlessly falling back to OpenSky Aviation API...")
-        from src.aviation_api import fetch_opensky_flights
-        api_records = fetch_opensky_flights(airport.get("icao_code", ""), direction=direction)
-        for r in api_records:
-            r["airport_iata"] = iata
-            r["country"] = airport.get("country_name", "")
-        return api_records
+        return []
 
     # Check for Cloudflare challenge page
     title = page.title()
     if "Just a moment..." in title or "Attention Required" in title:
-        page.wait_for_timeout(2000)
+        page.wait_for_timeout(3000)
         title = page.title()
         if "Just a moment..." in title or "Attention Required" in title:
-            print(f"     [!] Cloudflare challenge detected (Page title: '{title}').")
-            print(f"     [->] Seamlessly falling back to OpenSky Aviation API...")
-            from src.aviation_api import fetch_opensky_flights
-            api_records = fetch_opensky_flights(airport.get("icao_code", ""), direction=direction)
-            for r in api_records:
-                r["airport_iata"] = iata
-                r["country"] = airport.get("country_name", "")
-            return api_records
+            print(f"     [!] Cloudflare challenge detected on {iata}. Skipping to ensure 100% real data only.")
+            return []
 
     try:
-        page.wait_for_selector("table", timeout=8000)
+        page.wait_for_selector("table", timeout=10000)
     except Exception:
         title = page.title()
-        print(f"     [!] Web table not accessible on this IP (Page title: '{title}').")
-        print(f"     [->] Seamlessly falling back to OpenSky Aviation API...")
-        from src.aviation_api import fetch_opensky_flights
-        api_records = fetch_opensky_flights(airport.get("icao_code", ""), direction=direction)
-        for r in api_records:
-            r["airport_iata"] = iata
-            r["country"] = airport.get("country_name", "")
-        return api_records
+        print(f"     [!] Flight table not accessible for {iata} (Page title: '{title}'). Skipping.")
+        return []
 
     # Get initial row IDs (offset 0) to exclude subsequent/future flights
     initial_ids = set(page.eval_on_selector_all("table tbody tr", "elements => elements.map(e => e.id).filter(id => id)"))
