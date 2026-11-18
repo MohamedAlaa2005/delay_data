@@ -88,6 +88,7 @@ def scrape_airport_board(page, airport, direction="departures", max_clicks=6):
         return []
 
     records = []
+    initial_records = []
     current_date = ""
 
     for tr in tbody.find_all("tr"):
@@ -97,9 +98,6 @@ def scrape_airport_board(page, airport, direction="departures", max_clicks=6):
             continue
 
         row_id = tr.get("id", "")
-        if row_id and row_id in initial_ids:
-            continue
-
         date_attr = tr.get("data-date", "").strip()
         row_date = date_attr if date_attr else current_date
 
@@ -114,7 +112,7 @@ def scrape_airport_board(page, airport, direction="departures", max_clicks=6):
         airline = raw_cells[3] if len(raw_cells) > 3 else ""
         status = raw_cells[-1] if len(raw_cells) >= 5 else ""
 
-        records.append({
+        entry = {
             "airport_iata": iata,
             "airport_icao": airport.get("icao_code", ""),
             "country": airport.get("country_name", ""),
@@ -125,8 +123,18 @@ def scrape_airport_board(page, airport, direction="departures", max_clicks=6):
             "route_airport": route,
             "type": direction[:-1] if direction.endswith("s") else direction,
             "status": status,
-        })
+        }
 
-    print(f"     [✓] Extracted {len(records)} earlier {direction} for {iata}.")
+        if row_id and row_id in initial_ids:
+            initial_records.append(entry)
+        else:
+            records.append(entry)
+
+    # If earlier flights were loaded, prioritize them; otherwise, fallback to available active board flights
+    if not records and initial_records:
+        records = initial_records
+        print(f"     [✓] Extracted {len(records)} active {direction} from board for {iata} (no earlier history available).")
+    else:
+        print(f"     [✓] Extracted {len(records)} earlier {direction} for {iata}.")
     return records
 
