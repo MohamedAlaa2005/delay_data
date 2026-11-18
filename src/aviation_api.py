@@ -46,7 +46,7 @@ def get_opensky_token():
         print(f"     [!] Failed to get OpenSky OAuth token: {e}")
         return None
 
-def fetch_opensky_flights(icao_code, direction="departures", hours_back=4):
+def fetch_opensky_flights(icao_code, direction="departures", hours_back=14):
     """
     Fetch flights directly from The OpenSky Network REST API using OAuth2 authentication.
     """

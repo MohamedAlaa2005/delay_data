@@ -8,8 +8,8 @@ An automated, cloud-resilient, production-ready data pipeline that tracks global
 
 ```mermaid
 flowchart TD
-    subgraph Scheduling ["Automated Trigger (12:00 UTC Daily)"]
-        CRON["GitHub Actions Cron Schedule: 0 12 * * *"]
+    subgraph Scheduling ["Automated Trigger (Every 12 Hours: 00:00 & 12:00 UTC)"]
+        CRON["GitHub Actions Cron Schedule: 0 0,12 * * *"]
         DISPATCH["Manual Trigger (workflow_dispatch)"]
     end
 
@@ -133,9 +133,9 @@ As of the latest production verification:
 
 ---
 
-## 5. Daily GitHub Actions Automation
+## 5. Automated GitHub Actions (Every 12 Hours)
 
-- **Schedule**: Every day at **12:00 UTC** (`cron: '0 12 * * *'`).
+- **Schedule**: Twice a day at **00:00 and 12:00 UTC** (`cron: '0 0,12 * * *'`).
 - **Matrix Configuration**:
   ```yaml
   strategy:

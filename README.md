@@ -53,11 +53,11 @@ The **100 airports** are partitioned into **3 airport batches**, and each batch 
 
 ---
 
-## 3. GitHub Actions (Automated Daily Run at 12 o'clock)
+## 3. GitHub Actions (Automated Run Every 12 Hours: 00:00 & 12:00 UTC)
 
 Workflow file: [`.github/workflows/scrape_pipeline.yml`](.github/workflows/scrape_pipeline.yml)
 
-* **Schedule**: Runs automatically **every day at 12:00 UTC** (`cron: '0 12 * * *'`).
+* **Schedule**: Runs automatically **every 12 hours at 00:00 and 12:00 UTC** (`cron: '0 0,12 * * *'`).
 * **Matrix Concurrency**: Executes all 6 batches concurrently in parallel using GitHub Actions runners.
 * **Dual-Engine Ingestion**: Uses Playwright headed Chrome (`xvfb-run`), and seamlessly falls back to **The OpenSky Network Authenticated API** when datacenter IPs encounter Cloudflare anti-bot challenges.
 * **Manual Trigger**: Can also be executed manually anytime via the **Actions** tab in GitHub (**Run workflow** button).
