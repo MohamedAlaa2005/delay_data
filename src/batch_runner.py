@@ -169,34 +169,17 @@ def run_batch(batch_num, direction, headless=True):
                     page = context.new_page()
                     raw_records = scrape_airport_board(page, apt, direction=direction)
                     if raw_records:
-                        # 1. Determine unique dates for weather observations
-                        dates = {r["date"] for r in raw_records if r.get("date")}
-                        iso_dates = set()
-                        for d_str in dates:
-                            parts = d_str.strip().split()
-                            if len(parts) >= 4:
-                                try:
-                                    m_num = MONTH_MAP.get(parts[2].lower(), 11)
-                                    iso_dates.add(f"{parts[3]}-{m_num:02d}-{int(parts[1]):02d}")
-                                except Exception:
-                                    pass
-                        if not iso_dates:
-                            iso_dates.add(datetime.utcnow().strftime("%Y-%m-%d"))
+                        apt_tz = apt.get("timezone", "UTC")
+                        for r in raw_records:
+                            r["timezone"] = apt_tz
 
-                        # 2. Build & upsert 24 hourly weather observations per day into airport_weather
-                        weather_records = build_hourly_weather_records(iata, icao, iso_dates, WEATHERAPI_KEY)
-                        if db_conn and weather_records:
-                            w_count = upsert_weather_records(weather_records, conn=db_conn)
-                            print(f"     [✓] Ingested {w_count} hourly weather rows into 'airport_weather'.")
-
-                        # 3. Upsert lean flight records into departures / arrivals
+                        # Upsert lean flight records (scheduled_time standardized to London Time)
                         if db_conn:
                             f_count = upsert_flight_records(table_name, raw_records, conn=db_conn)
                             total_upserted += f_count
-                            print(f"     [✓] Ingested {f_count} {direction} into '{table_name}'.")
+                            print(f"     [✓] Ingested {f_count} {direction} for {iata} into '{table_name}' (London Time).")
 
-                        enriched = enrich_flight_records(raw_records, apt)
-                        all_batch_records.extend(enriched)
+                        all_batch_records.extend(raw_records)
                 except Exception as e:
                     print(f"     [!] Error processing {iata}: {e}")
                 finally:

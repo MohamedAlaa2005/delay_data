@@ -1,7 +1,10 @@
 import json
 import urllib.request
-from datetime import datetime
+import zoneinfo
+from datetime import datetime, timezone
 from config.settings import WEATHERAPI_KEY
+
+LONDON_TZ = zoneinfo.ZoneInfo("Europe/London")
 
 def fetch_aviation_metar(icao, hours=72):
     """Fetch official METAR reports from AviationWeather.gov (No key needed)."""
@@ -78,28 +81,35 @@ def find_prior_weatherapi(weatherapi_hours, flight_dt_local):
         }
     return {}
 
-def build_hourly_weather_records(iata, icao, date_set, api_key=None):
+def build_hourly_weather_records(iata, icao, date_set=None, api_key=None):
     """
-    Generate normalized 24 hourly weather observations per day for an airport.
+    Generate normalized 24 hourly weather observations per day for an airport,
+    standardized strictly to London time (Europe/London).
     Combines AviationWeather METAR reports with WeatherAPI history.
     Stored in 'airport_weather' (only 24 rows per day per airport vs thousands of flights).
     """
     if not date_set:
-        date_set = {datetime.utcnow().strftime("%Y-%m-%d")}
+        now_london = datetime.now(LONDON_TZ)
+        date_set = {now_london.strftime("%Y-%m-%d")}
 
     metar_list = fetch_aviation_metar(icao, hours=72) if icao else []
     wapi_hours = fetch_weatherapi_history(api_key, iata, date_set) if (api_key and iata) else []
 
-    # Map WeatherAPI by (date_str, hour) for direct lookup
+    # Map WeatherAPI by London (date_str, hour)
     wapi_map = {}
     for h in wapi_hours:
-        time_str = h.get("time")  # Format: "YYYY-MM-DD HH:00"
-        if time_str:
-            try:
-                dt = datetime.strptime(time_str[:16], "%Y-%m-%d %H:%M")
-                wapi_map[(dt.strftime("%Y-%m-%d"), dt.hour)] = h
-            except Exception:
-                pass
+        epoch = h.get("time_epoch")
+        if epoch:
+            dt_london = datetime.fromtimestamp(epoch, tz=LONDON_TZ)
+            wapi_map[(dt_london.strftime("%Y-%m-%d"), dt_london.hour)] = h
+        else:
+            time_str = h.get("time")  # Format: "YYYY-MM-DD HH:00"
+            if time_str:
+                try:
+                    dt = datetime.strptime(time_str[:16], "%Y-%m-%d %H:%M")
+                    wapi_map[(dt.strftime("%Y-%m-%d"), dt.hour)] = h
+                except Exception:
+                    pass
 
     records = []
     for dt_str in sorted(date_set):
@@ -109,16 +119,18 @@ def build_hourly_weather_records(iata, icao, date_set, api_key=None):
             continue
 
         for hour in range(24):
-            obs_dt = datetime(day_dt.year, day_dt.month, day_dt.day, hour, 0, 0)
+            # London wall-clock observation time
+            obs_dt_london = datetime(day_dt.year, day_dt.month, day_dt.day, hour, 0, 0)
             
-            # 1. Aviation METAR observation
-            prior_metar = find_prior_metar(metar_list, obs_dt)
+            # 1. Aviation METAR observation (compared strictly via UTC)
+            obs_dt_utc = obs_dt_london.replace(tzinfo=LONDON_TZ).astimezone(timezone.utc)
+            prior_metar = find_prior_metar(metar_list, obs_dt_utc)
             cloud_base = None
             if prior_metar and prior_metar.get("clouds"):
                 base = prior_metar["clouds"][0].get("base")
                 cloud_base = base if base is not None else None
 
-            # 2. WeatherAPI observation
+            # 2. WeatherAPI observation for this London hour
             wapi_h = wapi_map.get((dt_str, hour))
             if wapi_h:
                 cond = wapi_h.get("condition", {})
@@ -136,7 +148,7 @@ def build_hourly_weather_records(iata, icao, date_set, api_key=None):
                 w_code = cond.get("code")
                 w_is_day = wapi_h.get("is_day", 1)
             else:
-                prior_w = find_prior_weatherapi(wapi_hours, obs_dt) if wapi_hours else {}
+                prior_w = find_prior_weatherapi(wapi_hours, obs_dt_utc) if wapi_hours else {}
                 w_temp = prior_w.get("wapi_temp_c")
                 w_feels = prior_w.get("wapi_feelslike_c")
                 w_rh = prior_w.get("wapi_rh_pct")
@@ -153,7 +165,7 @@ def build_hourly_weather_records(iata, icao, date_set, api_key=None):
 
             rec = {
                 "airport_iata": iata.strip().upper(),
-                "observation_time": obs_dt,
+                "observation_time": obs_dt_london,
                 # Aviation Weather (METAR)
                 "metar_time": prior_metar.get("reportTime", "") if prior_metar else "",
                 "metar_flt_cat": prior_metar.get("fltCat", "") if prior_metar else "",

@@ -23,10 +23,11 @@ delay_data/
 ├── src/
 │   ├── __init__.py
 │   ├── aviation_api.py             # OpenSky Network OAuth2 REST API client
-│   ├── batch_runner.py             # 6-batch runner with immediate SQL streaming
+│   ├── batch_runner.py             # 6-batch flight scraper with London time standardization
 │   ├── db.py                       # Neon PostgreSQL batch upsert and schema management
 │   ├── scraper.py                  # Playwright scraper with immediate fallback logic
-│   └── weather.py                  # Aviation METAR + WeatherAPI historical fetcher
+│   ├── weather.py                  # Aviation METAR + WeatherAPI historical fetcher
+│   └── weather_runner.py           # Dedicated 24-hour weather ingestion runner (London time)
 ├── analyze_delays.py               # Delay analytics & weather benchmark report generator
 ├── main.py                         # Top-level unified CLI
 ├── requirements.txt                # Python dependencies
@@ -91,11 +92,26 @@ FROM v_departures
 WHERE airport_iata = 'DXB' AND scheduled_time >= NOW() - INTERVAL '24 hours';
 ```
 
+### Standardized Timezone: London Time (Europe/London)
+To guarantee consistency across all airports worldwide, all scheduled times in `departures` and `arrivals` and all observation times in `airport_weather` are standardized to **London Time (`Europe/London` / GMT / UTC)**:
+- Local airport times scraped from boards are converted to London time using each airport's official IANA timezone.
+- Hourly weather records are generated for hours `00:00` to `23:00` London time.
+- Views equi-join on `f.airport_iata = w.airport_iata AND date_trunc('hour', f.scheduled_time) = w.observation_time`.
+
 ---
 
 ## 5. Local Execution Commands
 
-### Run a Specific Batch:
+### Run Dedicated 24-Hour Weather Pipeline:
+```powershell
+# Ingest 24-hour weather for all 150 airports in London Time:
+python -m src.weather_runner
+
+# Ingest weather for Batch 1 (50 airports) for a specific date:
+python -m src.weather_runner --batch 1 --date 2026-11-18
+```
+
+### Run a Specific Flight Batch:
 ```powershell
 # Run Batch 1 Departures:
 python -m src.batch_runner --batch 1 --direction departures
