@@ -8,8 +8,6 @@ DOCS_DIR = BASE_DIR / "docs"
 
 # Core Data Files
 AIRPORTS_FILE = DATA_DIR / "airports_sample_100.csv"
-DEPARTURES_FILE = DATA_DIR / "departures_with_weather.csv"
-ARRIVALS_FILE = DATA_DIR / "arrivals_with_weather.csv"
 
 def load_env():
     """Load environment variables from .env.local or .env if present."""

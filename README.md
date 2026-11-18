@@ -17,9 +17,7 @@ delay_data/
 │   ├── settings.py                 # Central configurations & environment loaders
 │   └── neon.ts                     # Neon CLI project configuration
 ├── data/
-│   ├── airports_sample_100.csv     # 100 curated international airports (60 countries)
-│   ├── departures_with_weather.csv # Local cached departures with weather
-│   └── arrivals_with_weather.csv   # Local cached arrivals with weather
+│   └── airports_sample_100.csv     # 100 curated international airports (60 countries)
 ├── docs/
 │   └── FEATURES_GUIDE.md           # SQL derivation recipes & removed redundant columns guide
 ├── src/

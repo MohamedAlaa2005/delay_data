@@ -1,35 +1,48 @@
 import argparse
-import csv
-import os
 from collections import defaultdict
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from config.settings import DATABASE_URL
+from src.db import get_db_connection
 
-DEP_FILE = "departures_with_weather.csv"
-ARR_FILE = "arrivals_with_weather.csv"
-
-def load_rows(filepath):
-    if not os.path.exists(filepath):
-        return []
-    with open(filepath, "r", encoding="utf-8-sig") as f:
-        return list(csv.DictReader(f))
+def load_table_from_db(conn, table_name, country_filter=None):
+    """Fetch flight records directly from Neon PostgreSQL database."""
+    query = f"""
+    SELECT 
+        airport_iata, scheduled_time, flight, airline, route_airport, 
+        delay_minutes, metar_time, metar_flt_cat, metar_temp_c, metar_dewp_c,
+        metar_wdir_deg, metar_wspd_kt, metar_visib_mi, metar_altim_hpa,
+        metar_cover, metar_cloud_base_ft, wapi_temp_c, wapi_feelslike_c,
+        wapi_rh_pct, wapi_precip_mm, wapi_pressure_hpa, wapi_cloud_pct,
+        wapi_vis_km, wapi_wind_spd_kph, wapi_wind_dir_deg, wapi_wind_gust_kph,
+        wapi_cond_text, wapi_cond_code, wapi_is_day, '{table_name[:-1]}' AS type
+    FROM {table_name}
+    """
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(query)
+        rows = cur.fetchall()
+    return rows
 
 def analyze(country_filter=None):
-    dep_rows = load_rows(DEP_FILE)
-    arr_rows = load_rows(ARR_FILE)
+    conn = get_db_connection()
+    if not conn:
+        print("[!] Could not connect to Neon PostgreSQL database. Check DATABASE_URL.")
+        return
 
-    if country_filter:
-        c_clean = country_filter.strip().lower()
-        dep_rows = [r for r in dep_rows if c_clean in r.get("country", "").lower()]
-        arr_rows = [r for r in arr_rows if c_clean in r.get("country", "").lower()]
+    try:
+        dep_rows = load_table_from_db(conn, "departures")
+        arr_rows = load_table_from_db(conn, "arrivals")
+    finally:
+        conn.close()
 
     all_rows = dep_rows + arr_rows
 
     if not all_rows:
-        print(f"[!] No flight data found{f' for country: {country_filter}' if country_filter else ''}.")
+        print(f"[!] No flight records found in Neon database.")
         return
 
-    title_suffix = f" FOR [{country_filter.upper()}]" if country_filter else " ACROSS AIRPORTS"
     print("=" * 70)
-    print(f" FLIGHT DELAYS & WEATHER INTELLIGENCE REPORT{title_suffix}")
+    print(f" NEON DATABASE FLIGHT DELAYS & WEATHER INTELLIGENCE REPORT")
     print("=" * 70)
 
     total_dep = len(dep_rows)
@@ -45,93 +58,82 @@ def analyze(country_filter=None):
 
     airport_delays = defaultdict(list)
     airport_counts = defaultdict(int)
-    airport_countries = {}
     airline_delays = defaultdict(list)
     flt_cat_delays = defaultdict(list)
     weather_cond_delays = defaultdict(list)
 
     for r in all_rows:
         apt = r.get("airport_iata", "UNK")
-        country = r.get("country", "")
-        airport_countries[apt] = country
         airport_counts[apt] += 1
 
-        airline = r.get("airline", "Unknown").strip()
-        status = r.get("status", "").lower()
-        flt_cat = r.get("metar_flt_cat", "").strip() or "VFR"
-        cond = r.get("wapi_cond_text", "").strip() or "Clear"
+        airline = (r.get("airline") or "Unknown").strip()
+        delay_val = r.get("delay_minutes")
 
-        if "cancelled" in status:
+        if delay_val is None:
             cancelled_count += 1
             continue
 
-        d_str = r.get("delay_minutes", "")
         try:
-            d_min = float(d_str)
-            valid_delays.append(d_min)
-            airport_delays[apt].append(d_min)
+            d = int(delay_val)
+            valid_delays.append(d)
+            airport_delays[apt].append(d)
             if airline:
-                airline_delays[airline].append(d_min)
-            flt_cat_delays[flt_cat].append(d_min)
-            weather_cond_delays[cond].append(d_min)
+                airline_delays[airline].append(d)
 
-            if d_min >= 15:
+            if d >= 15:
                 delayed_15_count += 1
-            if d_min >= 45:
+            if d >= 45:
                 delayed_45_count += 1
-            if d_min < 0:
+            if d < 0:
                 early_count += 1
+
+            cat = (r.get("metar_flt_cat") or "").strip().upper()
+            if cat in ["VFR", "MVFR", "IFR", "LIFR"]:
+                flt_cat_delays[cat].append(d)
+
+            cond = (r.get("wapi_cond_text") or "").strip()
+            if cond:
+                weather_cond_delays[cond].append(d)
         except (ValueError, TypeError):
-            pass
+            continue
 
     n_valid = len(valid_delays)
-    avg_delay = sum(valid_delays) / n_valid if n_valid else 0
-    sorted_delays = sorted(valid_delays)
-    median_delay = sorted_delays[n_valid // 2] if n_valid else 0
+    avg_delay = sum(valid_delays) / n_valid if n_valid else 0.0
+    pct_15 = (delayed_15_count / n_valid * 100) if n_valid else 0.0
+    pct_45 = (delayed_45_count / n_valid * 100) if n_valid else 0.0
+    pct_early = (early_count / n_valid * 100) if n_valid else 0.0
 
-    pct_delayed_15 = (delayed_15_count / n_valid * 100) if n_valid else 0
-    pct_delayed_45 = (delayed_45_count / n_valid * 100) if n_valid else 0
-    pct_cancelled = (cancelled_count / total_all * 100) if total_all else 0
-    pct_early = (early_count / n_valid * 100) if n_valid else 0
+    print(f"\n1. SUMMARY METRICS (Source: Neon PostgreSQL)")
+    print(f"  Total Flights in Neon:      {total_all:,} (Departures: {total_dep:,} | Arrivals: {total_arr:,})")
+    print(f"  Distinct Airports Monitored: {len(airport_counts)}")
+    print(f"  Valid Completed Flights:    {n_valid:,}")
+    print(f"  Average Flight Delay:       {avg_delay:+6.1f} minutes")
+    print(f"  Flights Delayed >= 15 min:  {delayed_15_count:,} ({pct_15:5.1f}%)")
+    print(f"  Flights Delayed >= 45 min:  {delayed_45_count:,} ({pct_45:5.1f}%)")
+    print(f"  Flights Arrived Early (<0m):{early_count:,} ({pct_early:5.1f}%)")
+    print(f"  Cancelled Flights (NULL):   {cancelled_count:,}")
 
-    print(f"\n1. DATASET OVERVIEW")
-    print(f"  Total Flights Recorded : {total_all:,} ({total_dep:,} Departures, {total_arr:,} Arrivals)")
-    print(f"  Distinct Airports      : {len(airport_counts)} across {len(set(airport_countries.values()))} countries")
-    print(f"  Cancelled Flights      : {cancelled_count} ({pct_cancelled:.1f}%)")
-    print(f"  Flights Evaluated      : {n_valid:,}")
-    print(f"  Average Flight Delay   : {avg_delay:+.1f} minutes")
-    print(f"  Median Flight Delay    : {median_delay:+.1f} minutes")
-    print(f"  Departed / Landed Early: {early_count:,} ({pct_early:.1f}%)")
-    print(f"  Delayed >= 15 min      : {delayed_15_count:,} ({pct_delayed_15:.1f}%) [Standard Aviation Metric]")
-    print(f"  Severe Delay (>= 45m)  : {delayed_45_count:,} ({pct_delayed_45:.1f}%)")
+    # 2. Airport Performance
+    print(f"\n2. TOP AIRPORTS BY FLIGHT VOLUME & PERFORMANCE")
+    print(f"  {'IATA':<6} {'Flights':<9} {'Avg Delay':<12} {'% Delayed (>=15m)':<20} {'Max Delay'}")
+    print("  " + "-" * 65)
 
-    # 2. Airport Delay Rankings
-    print(f"\n2. AIRPORT FLIGHT DELAY BENCHMARK")
-    print(f"  {'IATA':<6} {'Country':<18} {'Flights':<9} {'Avg Delay':<12} {'% Delayed (>=15m)':<18} {'Max Delay'}")
-    print("  " + "-" * 75)
-    
-    sorted_airports = sorted(
-        airport_delays.keys(),
-        key=lambda a: (sum(airport_delays[a]) / len(airport_delays[a]) if airport_delays[a] else 0),
-        reverse=True
-    )
-
-    for apt in sorted_airports:
+    sorted_airports = sorted(airport_counts.keys(), key=lambda a: airport_counts[a], reverse=True)
+    for apt in sorted_airports[:15]:
         delays = airport_delays[apt]
         cnt = len(delays)
         if not cnt: continue
         avg_d = sum(delays) / cnt
         pct_d = sum(1 for d in delays if d >= 15) / cnt * 100
         max_d = max(delays)
-        c_name = airport_countries.get(apt, "")[:16]
-        print(f"  {apt:<6} {c_name:<18} {cnt:<9} {avg_d:+6.1f} min   {pct_d:5.1f}%             {max_d:+.0f} min")
+        print(f"  {apt:<6} {cnt:<9} {avg_d:+6.1f} min   {pct_d:5.1f}%             {max_d:+.0f} min")
 
     # 3. Top Airlines Delay Performance
-    print(f"\n3. TOP AIRLINES BY DELAY SEVERITY (min 10 flights)")
+    print(f"\n3. TOP AIRLINES BY DELAY SEVERITY (min 15 flights)")
     print(f"  {'Airline':<32} {'Flights':<9} {'Avg Delay':<12} {'% Delayed (>=15m)'}")
     print("  " + "-" * 65)
     
-    qualifying_airlines = [al for al in airline_delays if len(airline_delays[al]) >= 10]
+    qualifying_airlines = [al for al in airline_delays if len(airline_delays[al]) >= 15]
     sorted_airlines = sorted(
         qualifying_airlines,
         key=lambda al: (sum(airline_delays[al]) / len(airline_delays[al])),
@@ -175,7 +177,5 @@ def analyze(country_filter=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--country", type=str, default=None, help="Filter results by country (e.g. 'Australia' or 'Belgium')")
     args = parser.parse_args()
-    analyze(country_filter=args.country)
-
+    analyze()

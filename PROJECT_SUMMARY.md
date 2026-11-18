@@ -32,9 +32,8 @@ flowchart TD
         WAPI["WeatherAPI.com Hourly History (Surface)"]
     end
 
-    subgraph Storage ["Persistent Relational Storage"]
+    subgraph Storage ["Persistent Cloud Storage"]
         NEON[("Neon PostgreSQL Cloud\nTables: departures | arrivals")]
-        CSV["Local CSV Caches\ndata/*_with_weather.csv"]
     end
 
     CRON --> Matrix
@@ -47,7 +46,6 @@ flowchart TD
     Enrichment --> WAPI
     METAR --> NEON
     WAPI --> NEON
-    Enrichment --> CSV
 ```
 
 ---

@@ -7,8 +7,7 @@ from datetime import datetime, timedelta
 from playwright.sync_api import sync_playwright
 
 from config.settings import (
-    AIRPORTS_FILE, DEPARTURES_FILE, ARRIVALS_FILE,
-    WEATHERAPI_KEY, BATCHES_COUNT
+    AIRPORTS_FILE, WEATHERAPI_KEY, BATCHES_COUNT
 )
 from src.scraper import scrape_airport_board
 from src.weather import (
@@ -16,16 +15,6 @@ from src.weather import (
     fetch_weatherapi_history, find_prior_weatherapi
 )
 from src.db import upsert_records, init_tables, get_db_connection
-
-CSV_FIELDNAMES = [
-    "airport_iata", "airport_icao", "country", "date", "scheduled", "flight", "airline",
-    "route_airport", "type", "status", "delay_minutes",
-    "metar_time", "metar_flt_cat", "metar_temp_c", "metar_dewp_c", "metar_wdir_deg",
-    "metar_wspd_kt", "metar_visib_mi", "metar_altim_hpa", "metar_cover", "metar_cloud_base_ft",
-    "wapi_temp_c", "wapi_feelslike_c", "wapi_rh_pct", "wapi_precip_mm", "wapi_pressure_hpa",
-    "wapi_cloud_pct", "wapi_vis_km", "wapi_wind_spd_kph", "wapi_wind_dir_deg", "wapi_wind_gust_kph",
-    "wapi_cond_text", "wapi_cond_code", "wapi_is_day"
-]
 
 def load_all_airports():
     if not AIRPORTS_FILE.exists():
@@ -135,50 +124,6 @@ def enrich_flight_records(records, airport):
 
     return enriched
 
-def append_to_local_csv(enriched_records, direction):
-    if not enriched_records:
-        return
-    csv_file = DEPARTURES_FILE if direction == "departures" else ARRIVALS_FILE
-    
-    # Read existing composite keys to prevent duplicates in local CSV
-    existing_keys = set()
-    file_exists = csv_file.exists() and csv_file.stat().st_size > 0
-    if file_exists:
-        try:
-            with open(csv_file, "r", encoding="utf-8-sig") as f:
-                reader = csv.DictReader(f)
-                for r in reader:
-                    key = (
-                        r.get("airport_iata", "").strip().upper(),
-                        r.get("flight", "").strip(),
-                        r.get("scheduled", "").strip(),
-                        r.get("date", "").strip()
-                    )
-                    existing_keys.add(key)
-        except Exception:
-            pass
-
-    new_records = []
-    for r in enriched_records:
-        key = (
-            r.get("airport_iata", "").strip().upper(),
-            r.get("flight", "").strip(),
-            r.get("scheduled", "").strip(),
-            r.get("date", "").strip()
-        )
-        if key not in existing_keys:
-            existing_keys.add(key)
-            new_records.append(r)
-
-    if not new_records:
-        return
-
-    with open(csv_file, "a", newline="", encoding="utf-8-sig") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_FIELDNAMES, extrasaction="ignore")
-        if not file_exists:
-            writer.writeheader()
-        writer.writerows(new_records)
-
 def run_batch(batch_num, direction, headless=True):
     print("=" * 70)
     print(f" EXECUTING BATCH {batch_num}/3 | DIRECTION: {direction.upper()}")
@@ -241,7 +186,6 @@ def run_batch(batch_num, direction, headless=True):
                     raw_records = scrape_airport_board(page, apt, direction=direction)
                     if raw_records:
                         enriched = enrich_flight_records(raw_records, apt)
-                        append_to_local_csv(enriched, direction)
                         all_batch_records.extend(enriched)
                         
                         # High-performance immediate SQL batch upsert per airport
