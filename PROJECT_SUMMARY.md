@@ -32,8 +32,10 @@ flowchart TD
         WAPI["WeatherAPI.com Hourly History (Surface)"]
     end
 
-    subgraph Storage ["Persistent Cloud Storage"]
-        NEON[("Neon PostgreSQL Cloud\nTables: departures | arrivals")]
+    subgraph Storage ["Normalized Cloud Storage & SQL Views (Neon PostgreSQL)"]
+        WDB[("airport_weather Table\n(24 Hourly Rows / Airport / Day)")]
+        FDB[("departures | arrivals Tables\n(Lean Flight Movements)")]
+        VIEW[["SQL Views:\nv_departures | v_arrivals\n(Equi-join on airport_iata + hour)"]]
     end
 
     CRON --> Matrix
@@ -44,8 +46,12 @@ flowchart TD
     OS -->|API Flight Records| Enrichment
     Enrichment --> METAR
     Enrichment --> WAPI
-    METAR --> NEON
-    WAPI --> NEON
+    METAR --> WDB
+    WAPI --> WDB
+    PF --> FDB
+    OS --> FDB
+    WDB --> VIEW
+    FDB --> VIEW
 ```
 
 ---
@@ -58,9 +64,9 @@ flowchart TD
 - **International verification**: Exclusively airports operating international commercial routes (domestic/local-only airfields removed).
 - Hub coverage includes high-volume airports across all continents (e.g., `ATL`, `ORD`, `PEK`, `PVG`, `LHR`, `LGW`, `CDG`, `FRA`, `MUC`, `AMS`, `HND`, `NRT`, `DXB`, `AUH`, `RUH`, `JED`, `EZE`, `GRU`, `YYZ`, `CAI`, `ADD`, `SYD`, `BNE`).
 
-### B. Dual-Engine Flight Scraper (`src/scraper.py` & `src/aviation_api.py`)
-- **Engine 1 (Plane Finder)**: Uses Playwright with stealth context to scrape airport arrival/departure boards, clicking *"Earlier flights"* continuously to capture preceding flight blocks.
-- **Engine 2 (OpenSky Network OAuth2 Fallback)**: Datacenter IPs (such as GitHub Actions runners on Azure/Ubuntu) are challenged by Cloudflare. When a challenge (`Attention Required` / `Just a moment...`) or navigation timeout occurs, the system switches instantly to **The OpenSky Network REST API** using OAuth2 Client Credentials (`mohamedalaa-api-client`).
+### B. Stealth Browser & OpenSky Fallback (`src/scraper.py` & `src/aviation_api.py`)
+- **Engine 1 (Plane Finder via Camoufox)**: Uses Camoufox (a stealth Firefox hard fork spoofing fingerprint and behavioral leaks at the browser engine level) with automatic Cloudflare challenge detection and single-retry recovery.
+- **Engine 2 (OpenSky Network OAuth2 Fallback)**: Datacenter IPs challenged by Cloudflare fall back seamlessly to **The OpenSky Network REST API** using OAuth2 Client Credentials (`mohamedalaa-api-client`).
 
 ### C. Anti-Data Leakage Weather Enrichment (`src/weather.py`)
 To prevent future data leakage in machine learning forecasting, weather observations are strictly filtered:
@@ -73,50 +79,79 @@ $$\text{Observation Timestamp} \le \text{Scheduled Flight Time}$$
 - **Airport-by-Airport Streaming**: Records are committed to Neon immediately as each airport completes, ensuring zero data loss if a runner times out.
 - **High-Performance Multi-Row Batching**: Uses `psycopg2.extras.execute_values` (`page_size=2000`).
 - **Composite Unique Constraint & Idempotency**:
-  ```sql
-  CONSTRAINT uniq_{table}_flight_time UNIQUE (airport_iata, flight, scheduled_time)
-  ```
-  Flights are inserted via `ON CONFLICT (...) DO UPDATE SET`, updating existing delays without creating duplicate rows.
+  - `airport_weather`: `(airport_iata, observation_time)`
+  - `departures` / `arrivals`: `(airport_iata, flight, scheduled_time)`
 
 ---
 
-## 3. Database Schema (`departures` & `arrivals`)
+## 3. Normalized Database Schema & SQL Views
 
-Redundant derivable fields (`status`, `type`, `country`, `icao`) were eliminated to maintain 3NF database cleanliness:
+Storing weather inside a dedicated table reduces weather storage footprint by **>90%** (e.g. 50,000 flights/day share 3,600 hourly weather rows instead of duplicating 23 weather columns 50,000 times).
 
-| Column | Data Type | Source | Description |
-|---|---|---|---|
-| `id` | `SERIAL PRIMARY KEY` | Neon | Unique row identifier |
-| `airport_iata` | `VARCHAR(3)` | Metadata | 3-letter IATA airfield code (e.g., `JED`, `SYD`) |
-| `scheduled_time` | `TIMESTAMP` | Board / API | Scheduled UTC flight timestamp |
-| `flight` | `VARCHAR(20)` | Board / API | Flight / Callsign (e.g., `SV1024`, `QF1`) |
-| `airline` | `VARCHAR(60)` | Board / API | Operating carrier name or code |
-| `route_airport` | `VARCHAR(60)` | Board / API | Destination (departures) or Origin (arrivals) |
-| `delay_minutes` | `INT` | Derived | Delay relative to schedule ($>0$ late, $<0$ early, `NULL` cancelled) |
-| `metar_time` | `VARCHAR(30)` | NOAA METAR | Timestamp of observation |
-| `metar_flt_cat` | `VARCHAR(10)` | NOAA METAR | Flight category (`VFR`, `MVFR`, `IFR`, `LIFR`) |
-| `metar_temp_c` | `FLOAT` | NOAA METAR | Air temperature in Celsius |
-| `metar_dewp_c` | `FLOAT` | NOAA METAR | Dew point in Celsius |
-| `metar_wdir_deg` | `INT` | NOAA METAR | Wind direction in degrees ($0^\circ-360^\circ$) |
-| `metar_wspd_kt` | `INT` | NOAA METAR | Wind speed in knots |
-| `metar_visib_mi` | `VARCHAR(10)` | NOAA METAR | Prevailing visibility in statute miles |
-| `metar_altim_hpa` | `INT` | NOAA METAR | Altimeter setting in hectopascals |
-| `metar_cover` | `VARCHAR(10)` | NOAA METAR | Sky cover (`SKC`, `FEW`, `SCT`, `BKN`, `OVC`) |
-| `metar_cloud_base_ft` | `INT` | NOAA METAR | Base altitude of lowest cloud layer |
-| `wapi_temp_c` | `FLOAT` | WeatherAPI | Surface ambient temperature |
-| `wapi_feelslike_c` | `FLOAT` | WeatherAPI | Heat index / wind chill temperature |
-| `wapi_rh_pct` | `INT` | WeatherAPI | Relative humidity percentage |
-| `wapi_precip_mm` | `FLOAT` | WeatherAPI | Accumulated precipitation in millimeters |
-| `wapi_pressure_hpa`| `FLOAT` | WeatherAPI | Barometric pressure in hPa |
-| `wapi_cloud_pct` | `INT` | WeatherAPI | Cloud cover percentage ($0-100\%$) |
-| `wapi_vis_km` | `FLOAT` | WeatherAPI | Surface visibility in kilometers |
-| `wapi_wind_spd_kph` | `FLOAT` | WeatherAPI | Sustained wind speed in km/h |
-| `wapi_wind_dir_deg` | `INT` | WeatherAPI | Wind direction in degrees |
-| `wapi_wind_gust_kph`| `FLOAT` | WeatherAPI | Peak wind gust speed in km/h |
-| `wapi_cond_text` | `VARCHAR(60)`| WeatherAPI | Atmospheric condition description |
-| `wapi_cond_code` | `INT` | WeatherAPI | Standardized condition ID |
-| `wapi_is_day` | `INT` | WeatherAPI | Solar illumination indicator (`1` day, `0` night) |
-| `created_at` | `TIMESTAMP` | PostgreSQL | Ingestion timestamp (`CURRENT_TIMESTAMP`) |
+### A. Hourly Weather Table (`airport_weather`)
+Exactly **24 rows per airport per day**:
+
+| Column | Data Type | Description |
+|---|---|---|
+| `airport_iata` | `VARCHAR(3)` | 3-letter IATA airfield code (e.g., `JED`, `SYD`) |
+| `observation_time` | `TIMESTAMP` | Exact hourly observation timestamp (`YYYY-MM-DD HH:00:00`) |
+| `metar_time` | `VARCHAR(30)` | Official METAR report timestamp |
+| `metar_flt_cat` | `VARCHAR(10)` | Flight category (`VFR`, `MVFR`, `IFR`, `LIFR`) |
+| `metar_temp_c` | `FLOAT` | Ambient air temperature in Celsius |
+| `metar_dewp_c` | `FLOAT` | Dew point in Celsius |
+| `metar_wdir_deg` | `INT` | Wind direction in degrees ($0^\circ-360^\circ$) |
+| `metar_wspd_kt` | `INT` | Wind speed in knots |
+| `metar_visib_mi` | `VARCHAR(10)` | Prevailing visibility in statute miles |
+| `metar_altim_hpa` | `INT` | Altimeter setting in hectopascals |
+| `metar_cover` | `VARCHAR(10)` | Sky cover (`SKC`, `FEW`, `SCT`, `BKN`, `OVC`) |
+| `metar_cloud_base_ft` | `INT` | Lowest cloud ceiling base altitude in feet |
+| `wapi_temp_c` | `FLOAT` | Surface ambient temperature |
+| `wapi_feelslike_c` | `FLOAT` | Heat index / wind chill temperature |
+| `wapi_rh_pct` | `INT` | Relative humidity percentage |
+| `wapi_precip_mm` | `FLOAT` | Accumulated precipitation in millimeters |
+| `wapi_pressure_hpa`| `FLOAT` | Barometric pressure in hPa |
+| `wapi_cloud_pct` | `INT` | Cloud cover percentage ($0-100\%$) |
+| `wapi_vis_km` | `FLOAT` | Surface visibility in kilometers |
+| `wapi_wind_spd_kph` | `FLOAT` | Sustained wind speed in km/h |
+| `wapi_wind_dir_deg` | `INT` | Wind direction in degrees |
+| `wapi_wind_gust_kph`| `FLOAT` | Peak wind gust speed in km/h |
+| `wapi_cond_text` | `VARCHAR(60)`| Atmospheric condition description |
+| `wapi_cond_code` | `INT` | Standardized condition ID |
+| `wapi_is_day` | `INT` | Solar illumination indicator (`1` day, `0` night) |
+| `created_at` | `TIMESTAMP` | Record ingestion timestamp |
+
+### B. Lean Flight Movement Tables (`departures` & `arrivals`)
+
+| Column | Data Type | Description |
+|---|---|---|
+| `airport_iata` | `VARCHAR(3)` | 3-letter IATA airfield code |
+| `scheduled_time` | `TIMESTAMP` | Scheduled flight timestamp |
+| `flight` | `VARCHAR(20)` | Flight number / Callsign |
+| `airline` | `VARCHAR(60)` | Operating carrier name or code |
+| `route_airport` | `VARCHAR(60)` | Destination (departures) or Origin (arrivals) |
+| `delay_minutes` | `INT` | Delay relative to schedule ($>0$ late, $<0$ early, `NULL` cancelled) |
+| `status` | `VARCHAR(60)` | Raw operational status string |
+| `created_at` | `TIMESTAMP` | Record ingestion timestamp |
+
+### C. Unified SQL Views (`v_departures` & `v_arrivals`)
+Enables direct SELECT queries that join flight movements with their corresponding hourly weather without any storage overhead:
+
+```sql
+CREATE OR REPLACE VIEW v_departures AS
+SELECT 
+    f.id, f.airport_iata, f.scheduled_time, f.flight, f.airline,
+    f.route_airport, f.delay_minutes, f.status, 'departure' AS type,
+    w.metar_time, w.metar_flt_cat, w.metar_temp_c, w.metar_dewp_c,
+    w.metar_wdir_deg, w.metar_wspd_kt, w.metar_visib_mi, w.metar_altim_hpa,
+    w.metar_cover, w.metar_cloud_base_ft, w.wapi_temp_c, w.wapi_feelslike_c,
+    w.wapi_rh_pct, w.wapi_precip_mm, w.wapi_pressure_hpa, w.wapi_cloud_pct,
+    w.wapi_vis_km, w.wapi_wind_spd_kph, w.wapi_wind_dir_deg, w.wapi_wind_gust_kph,
+    w.wapi_cond_text, w.wapi_cond_code, w.wapi_is_day, f.created_at
+FROM departures f
+LEFT JOIN airport_weather w 
+    ON f.airport_iata = w.airport_iata 
+   AND date_trunc('hour', f.scheduled_time) = w.observation_time;
+```
 
 ---
 

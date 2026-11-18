@@ -12,9 +12,13 @@ from config.settings import (
 from src.scraper import scrape_airport_board
 from src.weather import (
     fetch_aviation_metar, find_prior_metar,
-    fetch_weatherapi_history, find_prior_weatherapi
+    fetch_weatherapi_history, find_prior_weatherapi,
+    build_hourly_weather_records
 )
-from src.db import upsert_records, init_tables, get_db_connection
+from src.db import (
+    upsert_records, upsert_weather_records, upsert_flight_records,
+    init_tables, get_db_connection, MONTH_MAP
+)
 
 def load_all_airports():
     if not AIRPORTS_FILE.exists():
@@ -158,19 +162,41 @@ def run_batch(batch_num, direction, headless=True):
 
             for idx, apt in enumerate(airports, 1):
                 iata = apt["iata_code"]
+                icao = apt.get("icao_code", "")
                 print(f"\n[{idx}/{len(airports)}] Processing {iata} ({apt['airport_name']})...")
                 page = None
                 try:
                     page = context.new_page()
                     raw_records = scrape_airport_board(page, apt, direction=direction)
                     if raw_records:
+                        # 1. Determine unique dates for weather observations
+                        dates = {r["date"] for r in raw_records if r.get("date")}
+                        iso_dates = set()
+                        for d_str in dates:
+                            parts = d_str.strip().split()
+                            if len(parts) >= 4:
+                                try:
+                                    m_num = MONTH_MAP.get(parts[2].lower(), 11)
+                                    iso_dates.add(f"{parts[3]}-{m_num:02d}-{int(parts[1]):02d}")
+                                except Exception:
+                                    pass
+                        if not iso_dates:
+                            iso_dates.add(datetime.utcnow().strftime("%Y-%m-%d"))
+
+                        # 2. Build & upsert 24 hourly weather observations per day into airport_weather
+                        weather_records = build_hourly_weather_records(iata, icao, iso_dates, WEATHERAPI_KEY)
+                        if db_conn and weather_records:
+                            w_count = upsert_weather_records(weather_records, conn=db_conn)
+                            print(f"     [✓] Ingested {w_count} hourly weather rows into 'airport_weather'.")
+
+                        # 3. Upsert lean flight records into departures / arrivals
+                        if db_conn:
+                            f_count = upsert_flight_records(table_name, raw_records, conn=db_conn)
+                            total_upserted += f_count
+                            print(f"     [✓] Ingested {f_count} {direction} into '{table_name}'.")
+
                         enriched = enrich_flight_records(raw_records, apt)
                         all_batch_records.extend(enriched)
-                        
-                        # High-performance immediate SQL batch upsert per airport
-                        if db_conn:
-                            count = upsert_records(table_name, enriched, conn=db_conn)
-                            total_upserted += count
                 except Exception as e:
                     print(f"     [!] Error processing {iata}: {e}")
                 finally:

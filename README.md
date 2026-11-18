@@ -69,7 +69,31 @@ Under **Settings > Environments > DATABASE_URL > Environment secrets**:
 
 ---
 
-## 4. Local Execution Commands
+## 4. Normalized Database Architecture & SQL Views
+
+To eliminate redundant data and reduce storage footprint by **>90%**, weather observations are stored in a dedicated, normalized table rather than duplicated across thousands of individual flight rows.
+
+### Tables & Storage Model:
+1. **`airport_weather`**: Stores hourly pre-flight atmospheric observations (**exactly 24 rows per airport per day**).
+   - Combines **AviationWeather.gov METAR** (temp, dewp, wind, visibility, altimeter, cloud cover & ceiling) and **WeatherAPI.com** surface observations (precipitation, humidity, pressure, gusts, sky conditions).
+   - Indexed on `(airport_iata, observation_time)`.
+2. **`departures` & `arrivals`**: Lean flight movement tables containing only flight metadata (`airport_iata`, `scheduled_time`, `flight`, `airline`, `route_airport`, `delay_minutes`, `status`).
+
+### Unified SQL Views:
+For seamless downstream analytics and ML feature engineering without redundant storage, SQL views join flights to the exact corresponding hourly weather observation:
+- **`v_departures` / `v_departures_with_weather`**: Flights joined to `airport_weather` on `f.airport_iata = w.airport_iata AND date_trunc('hour', f.scheduled_time) = w.observation_time`.
+- **`v_arrivals` / `v_arrivals_with_weather`**: Arrivals joined to `airport_weather` on the same equi-join.
+
+```sql
+-- Querying flight delays with hourly weather is as simple as:
+SELECT flight, airline, delay_minutes, metar_flt_cat, wapi_temp_c, wapi_cond_text
+FROM v_departures
+WHERE airport_iata = 'DXB' AND scheduled_time >= NOW() - INTERVAL '24 hours';
+```
+
+---
+
+## 5. Local Execution Commands
 
 ### Run a Specific Batch:
 ```powershell
