@@ -8,7 +8,7 @@ on:
 
 jobs:
   weather_sync:
-    name: "Global Weather Sync (150 Airports - 24 Hours London Time)"
+    name: "Global Weather Sync (150 Airports - 24 Hours GMT)"
     runs-on: ubuntu-latest
     environment: DATABASE_URL
     timeout-minutes: 25
@@ -28,7 +28,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Ingest 24-Hour Weather in London Time
+      - name: Ingest 24-Hour Weather in GMT (UTC+0)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           WEATHERAPI_KEY: ${{ secrets.WEATHERAPI_KEY }}

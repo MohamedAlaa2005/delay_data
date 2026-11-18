@@ -4,7 +4,8 @@ import zoneinfo
 from datetime import datetime, timezone
 from config.settings import WEATHERAPI_KEY
 
-LONDON_TZ = zoneinfo.ZoneInfo("Europe/London")
+GMT_TZ = timezone.utc
+LONDON_TZ = GMT_TZ  # Backward compatibility alias
 
 def fetch_aviation_metar(icao, hours=72):
     """Fetch official METAR reports from AviationWeather.gov (No key needed)."""
@@ -84,24 +85,24 @@ def find_prior_weatherapi(weatherapi_hours, flight_dt_local):
 def build_hourly_weather_records(iata, icao, date_set=None, api_key=None):
     """
     Generate normalized 24 hourly weather observations per day for an airport,
-    standardized strictly to London time (Europe/London).
+    standardized strictly to pure GMT (UTC+0).
     Combines AviationWeather METAR reports with WeatherAPI history.
     Stored in 'airport_weather' (only 24 rows per day per airport vs thousands of flights).
     """
     if not date_set:
-        now_london = datetime.now(LONDON_TZ)
-        date_set = {now_london.strftime("%Y-%m-%d")}
+        now_gmt = datetime.now(GMT_TZ)
+        date_set = {now_gmt.strftime("%Y-%m-%d")}
 
     metar_list = fetch_aviation_metar(icao, hours=72) if icao else []
     wapi_hours = fetch_weatherapi_history(api_key, iata, date_set) if (api_key and iata) else []
 
-    # Map WeatherAPI by London (date_str, hour)
+    # Map WeatherAPI by GMT (date_str, hour)
     wapi_map = {}
     for h in wapi_hours:
         epoch = h.get("time_epoch")
         if epoch:
-            dt_london = datetime.fromtimestamp(epoch, tz=LONDON_TZ)
-            wapi_map[(dt_london.strftime("%Y-%m-%d"), dt_london.hour)] = h
+            dt_gmt = datetime.fromtimestamp(epoch, tz=timezone.utc)
+            wapi_map[(dt_gmt.strftime("%Y-%m-%d"), dt_gmt.hour)] = h
         else:
             time_str = h.get("time")  # Format: "YYYY-MM-DD HH:00"
             if time_str:
@@ -119,18 +120,18 @@ def build_hourly_weather_records(iata, icao, date_set=None, api_key=None):
             continue
 
         for hour in range(24):
-            # London wall-clock observation time
-            obs_dt_london = datetime(day_dt.year, day_dt.month, day_dt.day, hour, 0, 0)
+            # Pure GMT observation time (UTC+0)
+            obs_dt_gmt = datetime(day_dt.year, day_dt.month, day_dt.day, hour, 0, 0)
+            obs_dt_utc = obs_dt_gmt.replace(tzinfo=timezone.utc)
             
-            # 1. Aviation METAR observation (compared strictly via UTC)
-            obs_dt_utc = obs_dt_london.replace(tzinfo=LONDON_TZ).astimezone(timezone.utc)
+            # 1. Aviation METAR observation (AviationWeather uses UTC)
             prior_metar = find_prior_metar(metar_list, obs_dt_utc)
             cloud_base = None
             if prior_metar and prior_metar.get("clouds"):
                 base = prior_metar["clouds"][0].get("base")
                 cloud_base = base if base is not None else None
 
-            # 2. WeatherAPI observation for this London hour
+            # 2. WeatherAPI observation for this GMT hour
             wapi_h = wapi_map.get((dt_str, hour))
             if wapi_h:
                 cond = wapi_h.get("condition", {})
@@ -165,7 +166,7 @@ def build_hourly_weather_records(iata, icao, date_set=None, api_key=None):
 
             rec = {
                 "airport_iata": iata.strip().upper(),
-                "observation_time": obs_dt_london,
+                "observation_time": obs_dt_gmt,
                 # Aviation Weather (METAR)
                 "metar_time": prior_metar.get("reportTime", "") if prior_metar else "",
                 "metar_flt_cat": prior_metar.get("fltCat", "") if prior_metar else "",

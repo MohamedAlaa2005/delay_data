@@ -70,15 +70,15 @@ flowchart TD
 
 ### C. Dedicated 24-Hour Weather Pipeline (`src/weather_runner.py` & `src/weather.py`)
 Rather than fetching weather inside each flight scraper batch (which causes duplicate API calls and slows down scrapers), weather ingestion runs in its own dedicated runner:
-- Fetches **exactly 24 hourly observations per airport per day** in **London Time (`Europe/London`)**.
+- Fetches **exactly 24 hourly observations per airport per day** strictly in **GMT (`UTC+0`)**.
 - Stores in `airport_weather` (`(airport_iata, observation_time)` unique constraint).
 - **Aviation Weather**: NOAA AviationWeather METAR (Flight Category `VFR`/`IFR`/`MVFR`/`LIFR`, Temperature, Dew point, Wind direction/speed, Visibility, Altimeter, Cloud cover, Cloud base).
 - **Surface Weather**: WeatherAPI.com (Feels-like temperature, Humidity, Precipitation mm, Atmospheric pressure, Cloud cover %, Visibility km, Wind gust, Weather condition code).
 
-### D. Timezone Standardization: London Time (`Europe/London`)
-To guarantee consistency across all airports worldwide, all scheduled times in `departures` and `arrivals` and all observation times in `airport_weather` are standardized to **London Time (`Europe/London` / GMT / UTC)**:
-- Local airport times scraped from boards are converted to London time using each airport's official IANA timezone.
-- Hourly weather records are generated for hours `00:00` to `23:00` London time.
+### D. Timezone Standardization: Pure GMT (`UTC+0`, Zulu Time)
+To guarantee consistency across all airports worldwide, all scheduled times in `departures` and `arrivals` and all observation times in `airport_weather` are standardized strictly to **pure GMT (`UTC+0`, without any daylight saving shifts)**:
+- Local airport times scraped from boards are converted to GMT (`UTC+0`) using each airport's official IANA timezone.
+- Hourly weather records are generated for hours `00:00` to `23:00` GMT.
 - Views equi-join on `f.airport_iata = w.airport_iata AND date_trunc('hour', f.scheduled_time) = w.observation_time`.
 
 ### E. Streaming SQL Batch Loading (`src/db.py`)

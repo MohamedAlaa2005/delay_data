@@ -92,10 +92,10 @@ FROM v_departures
 WHERE airport_iata = 'DXB' AND scheduled_time >= NOW() - INTERVAL '24 hours';
 ```
 
-### Standardized Timezone: London Time (Europe/London)
-To guarantee consistency across all airports worldwide, all scheduled times in `departures` and `arrivals` and all observation times in `airport_weather` are standardized to **London Time (`Europe/London` / GMT / UTC)**:
-- Local airport times scraped from boards are converted to London time using each airport's official IANA timezone.
-- Hourly weather records are generated for hours `00:00` to `23:00` London time.
+### Standardized Timezone: GMT (UTC+0, Zulu Time)
+To guarantee consistency across all airports worldwide, all scheduled times in `departures` and `arrivals` and all observation times in `airport_weather` are standardized strictly to **GMT (`UTC+0`, no daylight saving shifts)**:
+- Local airport times scraped from boards are converted to pure GMT (UTC+0) using each airport's official IANA timezone.
+- Hourly weather records are generated for hours `00:00` to `23:00` GMT.
 - Views equi-join on `f.airport_iata = w.airport_iata AND date_trunc('hour', f.scheduled_time) = w.observation_time`.
 
 ---
@@ -104,7 +104,7 @@ To guarantee consistency across all airports worldwide, all scheduled times in `
 
 ### Run Dedicated 24-Hour Weather Pipeline:
 ```powershell
-# Ingest 24-hour weather for all 150 airports in London Time:
+# Ingest 24-hour weather for all 150 airports in pure GMT (UTC+0):
 python -m src.weather_runner
 
 # Ingest weather for Batch 1 (50 airports) for a specific date:

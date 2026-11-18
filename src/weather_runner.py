@@ -3,7 +3,7 @@ import csv
 import sys
 from datetime import datetime
 from config.settings import AIRPORTS_FILE, WEATHERAPI_KEY, BATCHES_COUNT
-from src.weather import build_hourly_weather_records, LONDON_TZ
+from src.weather import build_hourly_weather_records, GMT_TZ
 from src.db import init_tables, get_db_connection, upsert_weather_records
 
 def load_airports(batch=None):
@@ -22,19 +22,19 @@ def load_airports(batch=None):
 def run_weather_pipeline(batch=None, target_date=None):
     """
     Dedicated weather ingestion runner.
-    Fetches exactly 24 hourly observations per day per airport in London Time (Europe/London),
+    Fetches exactly 24 hourly observations per day per airport strictly in GMT (UTC+0),
     and upserts into 'airport_weather'.
     """
     airports = load_airports(batch)
     batch_label = f"BATCH {batch} ({len(airports)} airports)" if batch else f"ALL {len(airports)} AIRPORTS"
     
     if not target_date:
-        target_date = datetime.now(LONDON_TZ).strftime("%Y-%m-%d")
+        target_date = datetime.now(GMT_TZ).strftime("%Y-%m-%d")
     date_set = {target_date}
 
     print("=" * 70)
     print(f" DEDICATED HOURLY WEATHER RUNNER | {batch_label}")
-    print(f" Target Date (London Time): {target_date} | London TZ: Europe/London")
+    print(f" Target Date: {target_date} | Timezone: GMT (UTC+0)")
     print("=" * 70)
 
     db_conn = get_db_connection()
@@ -76,3 +76,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     run_weather_pipeline(batch=args.batch, target_date=args.date)
+

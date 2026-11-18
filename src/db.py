@@ -6,31 +6,33 @@ import psycopg2
 from psycopg2.extras import execute_values
 from config.settings import DATABASE_URL
 
-LONDON_TZ = zoneinfo.ZoneInfo("Europe/London")
+GMT_TZ = timezone.utc
 
 MONTH_MAP = {
     "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
     "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12
 }
 
-def to_london_time(dt, airport_tz=None):
+def to_gmt_time(dt, airport_tz=None):
     """
-    Standardize datetime across all tables to London time (Europe/London).
+    Standardize datetime across all tables strictly to GMT (UTC+0, no DST shifts).
     If dt is naive and airport_tz is provided, localizes to airport local time first,
-    then converts to London time.
-    Returns naive datetime representing London wall-clock time.
+    then converts to pure GMT (UTC+0).
+    Returns naive datetime representing GMT wall-clock time.
     """
     if dt is None:
         return None
     if dt.tzinfo is not None:
-        return dt.astimezone(LONDON_TZ).replace(tzinfo=None)
+        return dt.astimezone(GMT_TZ).replace(tzinfo=None)
     if airport_tz:
         try:
             apt_tz = zoneinfo.ZoneInfo(airport_tz)
-            return dt.replace(tzinfo=apt_tz).astimezone(LONDON_TZ).replace(tzinfo=None)
+            return dt.replace(tzinfo=apt_tz).astimezone(GMT_TZ).replace(tzinfo=None)
         except Exception:
             pass
     return dt
+
+to_london_time = to_gmt_time  # Backward compatibility alias
 
 # =====================================================================
 # NORMALIZED DATABASE SCHEMAS & VIEWS
@@ -237,7 +239,7 @@ def parse_flight_timestamp(date_str, time_str, airport_tz=None):
     t_match = re.search(r"(\d{1,2}):(\d{2})", time_str)
     if t_match:
         local_dt = datetime(y, m, d, int(t_match.group(1)), int(t_match.group(2)))
-        return to_london_time(local_dt, airport_tz)
+        return to_gmt_time(local_dt, airport_tz)
     return None
 
 def upsert_weather_records(weather_records, conn=None):
@@ -370,7 +372,7 @@ def upsert_flight_records(table_name, flight_records, conn=None):
             if not isinstance(sched_dt, datetime):
                 sched_dt = parse_flight_timestamp(r.get("date"), r.get("scheduled"), apt_tz)
             elif apt_tz:
-                sched_dt = to_london_time(sched_dt, apt_tz)
+                sched_dt = to_gmt_time(sched_dt, apt_tz)
             if not sched_dt:
                 continue
 

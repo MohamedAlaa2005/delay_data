@@ -173,11 +173,11 @@ def run_batch(batch_num, direction, headless=True):
                         for r in raw_records:
                             r["timezone"] = apt_tz
 
-                        # Upsert lean flight records (scheduled_time standardized to London Time)
+                        # Upsert lean flight records (scheduled_time standardized strictly to GMT / UTC+0)
                         if db_conn:
                             f_count = upsert_flight_records(table_name, raw_records, conn=db_conn)
                             total_upserted += f_count
-                            print(f"     [✓] Ingested {f_count} {direction} for {iata} into '{table_name}' (London Time).")
+                            print(f"     [✓] Ingested {f_count} {direction} for {iata} into '{table_name}' (GMT / UTC+0).")
 
                         all_batch_records.extend(raw_records)
                 except Exception as e:
