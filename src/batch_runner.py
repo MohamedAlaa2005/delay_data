@@ -139,13 +139,45 @@ def append_to_local_csv(enriched_records, direction):
     if not enriched_records:
         return
     csv_file = DEPARTURES_FILE if direction == "departures" else ARRIVALS_FILE
+    
+    # Read existing composite keys to prevent duplicates in local CSV
+    existing_keys = set()
     file_exists = csv_file.exists() and csv_file.stat().st_size > 0
+    if file_exists:
+        try:
+            with open(csv_file, "r", encoding="utf-8-sig") as f:
+                reader = csv.DictReader(f)
+                for r in reader:
+                    key = (
+                        r.get("airport_iata", "").strip().upper(),
+                        r.get("flight", "").strip(),
+                        r.get("scheduled", "").strip(),
+                        r.get("date", "").strip()
+                    )
+                    existing_keys.add(key)
+        except Exception:
+            pass
+
+    new_records = []
+    for r in enriched_records:
+        key = (
+            r.get("airport_iata", "").strip().upper(),
+            r.get("flight", "").strip(),
+            r.get("scheduled", "").strip(),
+            r.get("date", "").strip()
+        )
+        if key not in existing_keys:
+            existing_keys.add(key)
+            new_records.append(r)
+
+    if not new_records:
+        return
 
     with open(csv_file, "a", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=CSV_FIELDNAMES, extrasaction="ignore")
         if not file_exists:
             writer.writeheader()
-        writer.writerows(enriched_records)
+        writer.writerows(new_records)
 
 def run_batch(batch_num, direction, headless=True):
     print("=" * 70)
