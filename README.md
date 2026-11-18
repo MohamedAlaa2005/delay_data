@@ -23,11 +23,10 @@ delay_data/
 ├── src/
 │   ├── __init__.py
 │   ├── aviation_api.py             # OpenSky Network OAuth2 REST API client
-│   ├── batch_runner.py             # 6-batch flight scraper with London time standardization
+│   ├── batch_runner.py             # 6-batch runner with immediate SQL streaming
 │   ├── db.py                       # Neon PostgreSQL batch upsert and schema management
 │   ├── scraper.py                  # Playwright scraper with immediate fallback logic
-│   ├── weather.py                  # Aviation METAR + WeatherAPI historical fetcher
-│   └── weather_runner.py           # Dedicated 24-hour weather ingestion runner (London time)
+│   └── weather.py                  # Aviation METAR + WeatherAPI historical fetcher
 ├── analyze_delays.py               # Delay analytics & weather benchmark report generator
 ├── main.py                         # Top-level unified CLI
 ├── requirements.txt                # Python dependencies
@@ -37,7 +36,18 @@ delay_data/
 
 ---
 
-## 2. The 6-Batch Architecture
+## 2. The 6-Batch Architecture & Timezone Standardization
+
+### Pure GMT (UTC+0, Zulu Time) Consistency Across All Rows:
+- All scheduled flight times and weather observations are converted and stored strictly in **GMT / UTC+0**.
+- PlaneFinder airport boards display local times and timezone abbreviations (e.g. `AEDT`, `CET`, `EET`, `PST`, `GMT`). Using each airport's official IANA timezone and timezone abbreviation mapper, all timestamps are normalized to GMT before ingestion.
+- Pre-flight weather observations (AviationWeather METAR and WeatherAPI history) are strictly matched relative to the flight's scheduled GMT time ($\text{Observation Time} \le \text{Scheduled GMT}$), preventing any future data leakage.
+
+### The 150 International Airports Dataset:
+- Exactly **150 top international airports** distributed worldwide.
+- **Maximum 2 airports per sovereign country** (preventing regional data bias).
+- **International flights verified**: Local/domestic-only airfields have been completely excluded.
+- Every airport in `data/airports_150.csv` includes verified `timezone`, `latitude_deg`, `longitude_deg`, `elevation_ft`, and board URLs.
 
 The **150 airports** are partitioned into **3 airport batches** (50 airports each), and each batch is split into **Departures** and **Arrivals**, creating **6 distinct batches**:
 
@@ -70,48 +80,9 @@ Under **Settings > Environments > DATABASE_URL > Environment secrets**:
 
 ---
 
-## 4. Normalized Database Architecture & SQL Views
+## 4. Local Execution Commands
 
-To eliminate redundant data and reduce storage footprint by **>90%**, weather observations are stored in a dedicated, normalized table rather than duplicated across thousands of individual flight rows.
-
-### Tables & Storage Model:
-1. **`airport_weather`**: Stores hourly pre-flight atmospheric observations (**exactly 24 rows per airport per day**).
-   - Combines **AviationWeather.gov METAR** (temp, dewp, wind, visibility, altimeter, cloud cover & ceiling) and **WeatherAPI.com** surface observations (precipitation, humidity, pressure, gusts, sky conditions).
-   - Indexed on `(airport_iata, observation_time)`.
-2. **`departures` & `arrivals`**: Lean flight movement tables containing only flight metadata (`airport_iata`, `scheduled_time`, `flight`, `airline`, `route_airport`, `delay_minutes`, `status`).
-
-### Unified SQL Views:
-For seamless downstream analytics and ML feature engineering without redundant storage, SQL views join flights to the exact corresponding hourly weather observation:
-- **`v_departures` / `v_departures_with_weather`**: Flights joined to `airport_weather` on `f.airport_iata = w.airport_iata AND date_trunc('hour', f.scheduled_time) = w.observation_time`.
-- **`v_arrivals` / `v_arrivals_with_weather`**: Arrivals joined to `airport_weather` on the same equi-join.
-
-```sql
--- Querying flight delays with hourly weather is as simple as:
-SELECT flight, airline, delay_minutes, metar_flt_cat, wapi_temp_c, wapi_cond_text
-FROM v_departures
-WHERE airport_iata = 'DXB' AND scheduled_time >= NOW() - INTERVAL '24 hours';
-```
-
-### Standardized Timezone: GMT (UTC+0, Zulu Time)
-To guarantee consistency across all airports worldwide, all scheduled times in `departures` and `arrivals` and all observation times in `airport_weather` are standardized strictly to **GMT (`UTC+0`, no daylight saving shifts)**:
-- Local airport times scraped from boards are converted to pure GMT (UTC+0) using each airport's official IANA timezone.
-- Hourly weather records are generated for hours `00:00` to `23:00` GMT.
-- Views equi-join on `f.airport_iata = w.airport_iata AND date_trunc('hour', f.scheduled_time) = w.observation_time`.
-
----
-
-## 5. Local Execution Commands
-
-### Run Dedicated 24-Hour Weather Pipeline:
-```powershell
-# Ingest 24-hour weather for all 150 airports in pure GMT (UTC+0):
-python -m src.weather_runner
-
-# Ingest weather for Batch 1 (50 airports) for a specific date:
-python -m src.weather_runner --batch 1 --date 2026-11-18
-```
-
-### Run a Specific Flight Batch:
+### Run a Specific Batch:
 ```powershell
 # Run Batch 1 Departures:
 python -m src.batch_runner --batch 1 --direction departures

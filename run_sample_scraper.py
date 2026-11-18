@@ -3,12 +3,13 @@ import csv
 import os
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 from bs4 import BeautifulSoup
 from camoufox.sync_api import Camoufox
 import urllib.request
 import json
 import re
+from src.db import parse_flight_timestamp
 
 # =====================================================================
 # CONFIGURATION
@@ -62,8 +63,15 @@ def fetch_aviation_metar(icao, hours=72):
     except Exception:
         return []
 
+def to_utc_epoch(dt):
+    if dt is None:
+        return 0
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=dt_timezone.utc).timestamp()
+    return dt.astimezone(dt_timezone.utc).timestamp()
+
 def find_prior_metar(metar_list, flight_dt_utc):
-    flight_ts = flight_dt_utc.timestamp()
+    flight_ts = to_utc_epoch(flight_dt_utc)
     best_metar = None
     best_diff = float("inf")
     for m in metar_list:
@@ -90,8 +98,8 @@ def fetch_weatherapi_history(api_key, iata, date_set):
             pass
     return hours_list
 
-def find_prior_weatherapi(weatherapi_hours, flight_dt_local):
-    flight_epoch = flight_dt_local.timestamp()
+def find_prior_weatherapi(weatherapi_hours, flight_dt_gmt):
+    flight_epoch = to_utc_epoch(flight_dt_gmt)
     best_hour = None
     best_diff = float("inf")
     for h in weatherapi_hours:
@@ -258,41 +266,41 @@ def enrich_and_append_records(flight_records, weather_csv_path, airport):
     icao = airport["icao_code"]
     iata = airport["iata_code"]
 
+    apt_tz = airport.get("timezone", "UTC")
+
     # 1. Fetch weather
     metar_data = fetch_aviation_metar(icao, hours=72)
-    dates = {r["date"] for r in flight_records if r["date"]}
+    parsed_flights = []
     iso_dates = set()
-    for d_str in dates:
-        y, m, d = parse_flight_date(d_str)
-        iso_dates.add(f"{y:04d}-{m:02d}-{d:02d}")
+    for r in flight_records:
+        sched_gmt = parse_flight_timestamp(r.get("date"), r.get("scheduled"), apt_tz)
+        if sched_gmt:
+            iso_dates.add(sched_gmt.strftime("%Y-%m-%d"))
+        parsed_flights.append((r, sched_gmt))
 
-    wapi_data = fetch_weatherapi_history(WEATHERAPI_KEY, iata, iso_dates) if WEATHERAPI_KEY else []
+    wapi_data = fetch_weatherapi_history(WEATHERAPI_KEY, iata, iso_dates) if (WEATHERAPI_KEY and iso_dates) else []
 
     enriched_rows = []
-    for r in flight_records:
-        y, m, d = parse_flight_date(r["date"])
-        sh, sm = parse_time(r["scheduled"])
-        if sh is None:
-            sh, sm = 12, 0
-
-        sched_dt_local = datetime(y, m, d, sh, sm)
-        sched_dt_utc = sched_dt_local # approximation if timezone not parsed
+    for r, sched_gmt in parsed_flights:
+        if not sched_gmt:
+            sched_gmt = parse_flight_timestamp(r.get("date"), "12:00", apt_tz) or datetime(2026, 11, 18, 12, 0)
 
         # Delay computation
         delay_minutes = ""
-        is_cancelled = "cancelled" in r["status"].lower()
+        is_cancelled = "cancelled" in r.get("status", "").lower()
         if not is_cancelled:
-            act_h, act_m = parse_time(r["status"])
-            if act_h is not None:
-                actual_dt = datetime(y, m, d, act_h, act_m)
-                diff = (actual_dt - sched_dt_local).total_seconds()
-                if diff < -43200: actual_dt += timedelta(days=1)
-                elif diff > 43200: actual_dt -= timedelta(days=1)
-                delay_minutes = round((actual_dt - sched_dt_local).total_seconds() / 60.0)
+            act_m = re.search(r"(\d{1,2}):(\d{2})", r.get("status", ""))
+            if act_m:
+                act_gmt = parse_flight_timestamp(r.get("date"), r.get("status"), apt_tz)
+                if act_gmt:
+                    diff = (act_gmt - sched_gmt).total_seconds()
+                    if diff < -43200: act_gmt += timedelta(days=1)
+                    elif diff > 43200: act_gmt -= timedelta(days=1)
+                    delay_minutes = round((act_gmt - sched_gmt).total_seconds() / 60.0)
 
-        # Weather lookup
-        prior_metar = find_prior_metar(metar_data, sched_dt_utc)
-        prior_wapi = find_prior_weatherapi(wapi_data, sched_dt_local)
+        # Weather lookup strictly relative to scheduled GMT
+        prior_metar = find_prior_metar(metar_data, sched_gmt)
+        prior_wapi = find_prior_weatherapi(wapi_data, sched_gmt)
 
         cloud_base = ""
         if prior_metar and prior_metar.get("clouds"):
@@ -303,6 +311,8 @@ def enrich_and_append_records(flight_records, weather_csv_path, airport):
             "airport_iata": r["airport_iata"],
             "airport_icao": r["airport_icao"],
             "country": r["country"],
+            "timezone": apt_tz,
+            "scheduled_time": sched_gmt.strftime("%Y-%m-%d %H:%M:%S"),
             "date": r["date"],
             "scheduled": r["scheduled"],
             "flight": r["flight"],

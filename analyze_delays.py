@@ -6,19 +6,17 @@ from config.settings import DATABASE_URL
 from src.db import get_db_connection
 
 def load_table_from_db(conn, table_name, country_filter=None):
-    """Fetch flight records joined with normalized hourly weather from Neon PostgreSQL SQL views."""
-    view_name = f"v_{table_name}"
+    """Fetch flight records directly from Neon PostgreSQL database."""
     query = f"""
     SELECT 
         airport_iata, scheduled_time, flight, airline, route_airport, 
-        delay_minutes, status, type,
-        metar_time, metar_flt_cat, metar_temp_c, metar_dewp_c,
+        delay_minutes, metar_time, metar_flt_cat, metar_temp_c, metar_dewp_c,
         metar_wdir_deg, metar_wspd_kt, metar_visib_mi, metar_altim_hpa,
         metar_cover, metar_cloud_base_ft, wapi_temp_c, wapi_feelslike_c,
         wapi_rh_pct, wapi_precip_mm, wapi_pressure_hpa, wapi_cloud_pct,
         wapi_vis_km, wapi_wind_spd_kph, wapi_wind_dir_deg, wapi_wind_gust_kph,
-        wapi_cond_text, wapi_cond_code, wapi_is_day
-    FROM {view_name}
+        wapi_cond_text, wapi_cond_code, wapi_is_day, '{table_name[:-1]}' AS type
+    FROM {table_name}
     """
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(query)

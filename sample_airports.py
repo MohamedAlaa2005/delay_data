@@ -47,12 +47,20 @@ def generate_airport_sample(target_total=150, max_per_country=2):
         of_airports_txt = resp.read().decode("utf-8", errors="ignore")
 
     of_country_map = {}
+    of_tz_map = {
+        "ISB": "Asia/Karachi",
+        "DOH": "Asia/Qatar",
+        "IST": "Europe/Istanbul"
+    }
     for r in csv.reader(io.StringIO(of_airports_txt)):
-        if len(r) >= 5:
+        if len(r) >= 12:
             iata = r[4].strip().upper()
             country = r[3].strip()
+            tz = r[11].strip()
             if len(iata) == 3 and iata.isalpha():
                 of_country_map[iata] = country
+                if tz and tz != r"\N" and iata not in of_tz_map:
+                    of_tz_map[iata] = tz
 
     # 4. Fetch OpenFlights routes to calculate total & international route traffic
     print("[4/5] Downloading OpenFlights flight routes database (67,000+ routes)...")
@@ -130,6 +138,7 @@ def generate_airport_sample(target_total=150, max_per_country=2):
             "country_code": ccode,
             "country_name": cname,
             "continent": apt.get("continent", "").strip(),
+            "timezone": of_tz_map.get(iata, "UTC"),
             "latitude_deg": apt.get("latitude_deg", "").strip(),
             "longitude_deg": apt.get("longitude_deg", "").strip(),
             "elevation_ft": apt.get("elevation_ft", "").strip(),

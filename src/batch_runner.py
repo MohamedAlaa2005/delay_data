@@ -12,12 +12,11 @@ from config.settings import (
 from src.scraper import scrape_airport_board
 from src.weather import (
     fetch_aviation_metar, find_prior_metar,
-    fetch_weatherapi_history, find_prior_weatherapi,
-    build_hourly_weather_records
+    fetch_weatherapi_history, find_prior_weatherapi
 )
 from src.db import (
-    upsert_records, upsert_weather_records, upsert_flight_records,
-    init_tables, get_db_connection, MONTH_MAP
+    upsert_records, init_tables, get_db_connection,
+    parse_flight_timestamp
 )
 
 def load_all_airports():
@@ -41,43 +40,41 @@ def enrich_flight_records(records, airport):
 
     icao = airport.get("icao_code", "")
     iata = airport.get("iata_code", "")
+    apt_tz = airport.get("timezone", "UTC")
 
     metar_data = fetch_aviation_metar(icao, hours=72)
-    dates = {r["date"] for r in records if r.get("date")}
-    iso_dates = set()
-    for d_str in dates:
-        parts = d_str.strip().split()
-        if len(parts) >= 4:
-            try:
-                iso_dates.add(f"{parts[3]}-11-{int(parts[1]):02d}")
-            except Exception:
-                pass
 
-    wapi_data = fetch_weatherapi_history(WEATHERAPI_KEY, iata, iso_dates) if WEATHERAPI_KEY else []
+    # First pass: parse scheduled GMT time for all records and collect target UTC dates for WeatherAPI
+    parsed_flights = []
+    iso_dates = set()
+    for r in records:
+        sched_gmt = parse_flight_timestamp(r.get("date"), r.get("scheduled"), apt_tz)
+        if sched_gmt:
+            iso_dates.add(sched_gmt.strftime("%Y-%m-%d"))
+        parsed_flights.append((r, sched_gmt))
+
+    wapi_data = fetch_weatherapi_history(WEATHERAPI_KEY, iata, iso_dates) if (WEATHERAPI_KEY and iso_dates) else []
 
     enriched = []
-    for r in records:
-        d_parts = r.get("date", "").strip().split()
-        sh, sm = 12, 0
-        m = re.search(r"(\d{1,2}):(\d{2})", r.get("scheduled", ""))
-        if m:
-            sh, sm = int(m.group(1)), int(m.group(2))
-
-        sched_dt = datetime(2026, 11, int(d_parts[1]) if len(d_parts) >= 4 else 17, sh, sm)
+    for r, sched_gmt in parsed_flights:
+        if not sched_gmt:
+            sched_gmt = parse_flight_timestamp(r.get("date"), "12:00", apt_tz) or datetime(2026, 11, 18, 12, 0)
 
         delay_minutes = ""
         is_canc = "cancelled" in r.get("status", "").lower()
         if not is_canc:
             act_m = re.search(r"(\d{1,2}):(\d{2})", r.get("status", ""))
             if act_m:
-                act_dt = datetime(sched_dt.year, sched_dt.month, sched_dt.day, int(act_m.group(1)), int(act_m.group(2)))
-                diff = (act_dt - sched_dt).total_seconds()
-                if diff < -43200: act_dt += timedelta(days=1)
-                elif diff > 43200: act_dt -= timedelta(days=1)
-                delay_minutes = round((act_dt - sched_dt).total_seconds() / 60.0)
+                act_gmt = parse_flight_timestamp(r.get("date"), r.get("status"), apt_tz)
+                if act_gmt:
+                    diff = (act_gmt - sched_gmt).total_seconds()
+                    if diff < -43200: act_gmt += timedelta(days=1)
+                    elif diff > 43200: act_gmt -= timedelta(days=1)
+                    delay_minutes = round((act_gmt - sched_gmt).total_seconds() / 60.0)
 
-        prior_metar = find_prior_metar(metar_data, sched_dt)
-        prior_wapi = find_prior_weatherapi(wapi_data, sched_dt)
+        # Weather observation matching strictly prior to scheduled GMT time
+        prior_metar = find_prior_metar(metar_data, sched_gmt)
+        prior_wapi = find_prior_weatherapi(wapi_data, sched_gmt)
 
         cloud_base = ""
         if prior_metar and prior_metar.get("clouds"):
@@ -88,6 +85,8 @@ def enrich_flight_records(records, airport):
             "airport_iata": r["airport_iata"],
             "airport_icao": r["airport_icao"],
             "country": r["country"],
+            "timezone": apt_tz,
+            "scheduled_time": sched_gmt,
             "date": r["date"],
             "scheduled": r["scheduled"],
             "flight": r["flight"],
@@ -162,24 +161,19 @@ def run_batch(batch_num, direction, headless=True):
 
             for idx, apt in enumerate(airports, 1):
                 iata = apt["iata_code"]
-                icao = apt.get("icao_code", "")
                 print(f"\n[{idx}/{len(airports)}] Processing {iata} ({apt['airport_name']})...")
                 page = None
                 try:
                     page = context.new_page()
                     raw_records = scrape_airport_board(page, apt, direction=direction)
                     if raw_records:
-                        apt_tz = apt.get("timezone", "UTC")
-                        for r in raw_records:
-                            r["timezone"] = apt_tz
-
-                        # Upsert lean flight records (scheduled_time standardized strictly to GMT / UTC+0)
+                        enriched = enrich_flight_records(raw_records, apt)
+                        all_batch_records.extend(enriched)
+                        
+                        # High-performance immediate SQL batch upsert per airport
                         if db_conn:
-                            f_count = upsert_flight_records(table_name, raw_records, conn=db_conn)
-                            total_upserted += f_count
-                            print(f"     [✓] Ingested {f_count} {direction} for {iata} into '{table_name}' (GMT / UTC+0).")
-
-                        all_batch_records.extend(raw_records)
+                            count = upsert_records(table_name, enriched, conn=db_conn)
+                            total_upserted += count
                 except Exception as e:
                     print(f"     [!] Error processing {iata}: {e}")
                 finally:

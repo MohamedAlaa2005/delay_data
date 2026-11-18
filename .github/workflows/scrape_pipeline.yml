@@ -7,35 +7,6 @@ on:
   workflow_dispatch: # Allows manual trigger from GitHub Actions UI
 
 jobs:
-  weather_sync:
-    name: "Global Weather Sync (150 Airports - 24 Hours GMT)"
-    runs-on: ubuntu-latest
-    environment: DATABASE_URL
-    timeout-minutes: 25
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: 'pip'
-
-      - name: Install Python Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Ingest 24-Hour Weather in GMT (UTC+0)
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          WEATHERAPI_KEY: ${{ secrets.WEATHERAPI_KEY }}
-          PYTHONUNBUFFERED: "1"
-        run: |
-          python -m src.weather_runner
-
   scrape_and_sync:
     name: "Batch ${{ matrix.batch }} - ${{ matrix.direction }}"
     runs-on: ubuntu-latest
