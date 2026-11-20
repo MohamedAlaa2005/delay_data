@@ -13,20 +13,29 @@ def clean_cell_text(td):
         return ""
     return " ".join(td.get_text(separator=" ", strip=True).split())
 
-def scrape_airport_board(page, airport, direction="departures", max_clicks=6):
-    """Scrape earlier flights for an airport in a given direction."""
+def scrape_airport_board(page, airport, direction="departures", max_clicks=3):
+    """Scrape flights for an airport in a given direction."""
     iata = airport["iata_code"]
     url = f"https://planefinder.net/data/airport/{iata}/{direction}"
     print(f"  -> Scraping {iata} ({airport.get('country_name', '')}) {direction.upper()}...")
 
+    # Accelerate scraping: block heavy media, video streams, and ad trackers
+    try:
+        page.route("**/*.{png,jpg,jpeg,webp,gif,mp4,mp3,woff,woff2}", lambda route: route.abort())
+        page.route("*taboola*", lambda route: route.abort())
+        page.route("*googlesyndication*", lambda route: route.abort())
+        page.route("*doubleclick*", lambda route: route.abort())
+    except Exception:
+        pass
+
     max_attempts = 2  # Attempt once, retry once more if blocked by Cloudflare
     for attempt in range(1, max_attempts + 1):
         try:
-            page.goto(url, wait_until="domcontentloaded", timeout=25000)
+            page.goto(url, wait_until="domcontentloaded", timeout=20000)
         except Exception as e:
             if attempt < max_attempts:
                 print(f"     [!] Navigation error on {iata} ({e}). Retrying once more...")
-                page.wait_for_timeout(3000)
+                page.wait_for_timeout(2000)
                 continue
             print(f"     [!] Navigation timeout/error for {iata}: {e}")
             return []
@@ -40,7 +49,7 @@ def scrape_airport_board(page, airport, direction="departures", max_clicks=6):
         if "Just a moment..." in title or "Attention Required" in title:
             if attempt < max_attempts:
                 print(f"     [!] Cloudflare challenge detected on {iata}. Waiting and retrying once more (attempt {attempt + 1}/{max_attempts})...")
-                page.wait_for_timeout(5000)
+                page.wait_for_timeout(4000)
                 continue
             else:
                 print(f"     [!] Cloudflare challenge persisted on {iata} after retry. Skipping to ensure 100% real data only.")
@@ -48,13 +57,19 @@ def scrape_airport_board(page, airport, direction="departures", max_clicks=6):
         break
 
     try:
-        page.wait_for_selector("table", timeout=10000)
+        page.wait_for_selector("table", timeout=6000)
+        # Wait for client-side AJAX flight rows to populate the table
+        page.wait_for_selector("table tbody tr td", timeout=10000)
+        page.wait_for_timeout(800)
     except Exception:
         title = page.title()
-        print(f"     [!] Flight table not accessible for {iata} (Page title: '{title}'). Skipping.")
+        if not page.query_selector("table"):
+            print(f"     [!] Flight table not accessible for {iata} (Page title: '{title}'). Skipping.")
+            return []
+        print(f"     [i] Airport board for {iata} currently has 0 flights listed on PlaneFinder.")
         return []
 
-    # Get initial row IDs (offset 0) to exclude subsequent/future flights
+    # Get initial row IDs (offset 0)
     initial_ids = set(page.eval_on_selector_all("table tbody tr", "elements => elements.map(e => e.id).filter(id => id)"))
 
     # Continuous click on "Show earlier flights"
@@ -69,7 +84,7 @@ def scrape_airport_board(page, airport, direction="departures", max_clicks=6):
         for _ in range(max_clicks):
             try:
                 page.eval_on_selector("button.earlier-flights", "btn => btn.click()")
-                page.wait_for_timeout(1400)
+                page.wait_for_timeout(1000)
                 cur_count = len(page.query_selector_all("table tbody tr"))
                 if cur_count > last_count:
                     last_count = cur_count
